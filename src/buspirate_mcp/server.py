@@ -40,6 +40,9 @@ _hardware_port: str = ""
 
 def _get_hardware(port: str | None = None) -> BusPirateHardware:
     global _hardware, _hardware_port
+    # Detect dead connection (uart set to None by disconnect or stale state)
+    if _hardware is not None and _hardware.uart is None:
+        _hardware = None
     if _hardware is None:
         if port is None:
             devices = BusPirateHardware.list_devices()

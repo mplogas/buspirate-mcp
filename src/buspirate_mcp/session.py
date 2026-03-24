@@ -72,14 +72,17 @@ class Session:
         self._log_file.flush()
 
     def close(self) -> None:
-        """Close the log file and mark session as disconnected. Safe to call twice."""
+        """Close the log file and mark session as disconnected. Safe to call twice.
+
+        Does NOT disconnect the hardware -- the hardware connection is
+        shared across sessions and managed by the server. Only the log
+        file is closed here.
+        """
         if not self.connected:
             return
         self.connected = False
         self._log_file.close()
         self._log_file = None
-        if self.hardware is not None:
-            self.hardware.disconnect()
 
 
 class SessionManager:
