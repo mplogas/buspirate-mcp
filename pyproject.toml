@@ -1,0 +1,35 @@
+# Note: the BPIO2 SDK must be installed manually -- it is not available on PyPI.
+# See docs/superpowers/specs/2026-03-22-pidev-sec-mvp-design.md for SDK setup.
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "buspirate-mcp"
+version = "0.1.0"
+description = "MCP server for BusPirate 6 hardware security testing"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "pyserial>=3.5",
+    "cobs>=1.2.0",
+    "esptool>=4.0",
+    # BPIO2 SDK is vendored as a git submodule at vendor/bpio2/
+    # pyserial and cobs are its transitive dependencies
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "hardware: requires physical BusPirate connection",
+]
