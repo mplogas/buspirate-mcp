@@ -159,6 +159,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "voltage_v": {"type": "number", "minimum": 0.8, "maximum": 5.0},
                 "current_limit_ma": {"type": "integer", "minimum": 0, "maximum": 500},
+                "_confirmed": {"type": "boolean", "default": False, "description": "Set true to confirm execution"},
             },
             "required": ["voltage_v", "current_limit_ma"],
         },
@@ -174,6 +175,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "enable": {"type": "boolean"},
+                "_confirmed": {"type": "boolean", "default": False, "description": "Set true to confirm execution"},
             },
             "required": ["enable"],
         },

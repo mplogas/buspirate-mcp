@@ -28,13 +28,20 @@ pip install -e ".[dev]"
 
 ## MCP Client Configuration
 
-Add to `.mcp.json` (Claude Code) or your MCP client config:
+Copy the example config and adjust paths for your machine:
+
+```bash
+cp .mcp.json.example .mcp.json
+# Edit .mcp.json with the absolute path to your venv's python
+```
+
+The `.mcp.json` is gitignored since paths are machine-specific. Example config:
 
 ```json
 {
   "mcpServers": {
     "buspirate": {
-      "command": "python",
+      "command": "/path/to/.venv/bin/python",
       "args": ["-m", "buspirate_mcp"]
     }
   }

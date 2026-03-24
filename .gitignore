@@ -11,6 +11,9 @@ venv/
 # Engagement data -- may contain secrets extracted from targets
 engagements/*/
 
+# Machine-specific MCP config (copy from .mcp.json.example)
+.mcp.json
+
 # Test/build artifacts
 .pytest_cache/
 
