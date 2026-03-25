@@ -104,14 +104,16 @@ class SessionManager:
         sanitized = _sanitize_name(name)
         if not sanitized:
             sanitized = "unnamed"
-        date_prefix = datetime.now().strftime("%Y-%m-%d")
-        folder_name = f"{date_prefix}-{sanitized}"
+        timestamp = datetime.now().strftime("%d-%m-%Y-%H-%M")
 
+        # DD-MM-YYYY-HH-MM_BP_<name>
+        folder_name = f"{timestamp}_BP_{sanitized}"
         engagement_path = self._engagements_dir / folder_name
-        # If folder already exists (duplicate name same day), append session ID
-        if engagement_path.exists():
-            folder_name = f"{folder_name}-{str(uuid.uuid4())[:8]}"
+        counter = 1
+        while engagement_path.exists():
+            folder_name = f"{timestamp}_BP_{sanitized}-{counter}"
             engagement_path = self._engagements_dir / folder_name
+            counter += 1
         (engagement_path / "logs").mkdir(parents=True, exist_ok=True)
         (engagement_path / "artifacts").mkdir(parents=True, exist_ok=True)
 
@@ -121,7 +123,7 @@ class SessionManager:
         config = {
             "session_id": session_id,
             "name": sanitized,
-            "date": date_prefix,
+            "date": timestamp,
             "device_path": device_path,
             "baud": baud,
             "pins": pins,

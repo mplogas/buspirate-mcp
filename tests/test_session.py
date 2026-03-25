@@ -95,7 +95,7 @@ class TestSessionManager:
             baud=9600,
             pins={"tx": 4, "rx": 5},
         )
-        assert re.match(r"\d{4}-\d{2}-\d{2}-", session.engagement_path.name)
+        assert re.match(r"\d{2}-\d{2}-\d{4}-\d{2}-\d{2}_BP_", session.engagement_path.name)
 
     def test_get_session(self, tmp_path):
         mgr = SessionManager(engagements_dir=tmp_path)
