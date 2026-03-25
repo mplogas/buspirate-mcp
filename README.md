@@ -6,11 +6,11 @@ Built for use with Claude Code but works with any MCP client.
 
 ## What it does
 
-- **UART probing** -- detect baud rates, capture serial output, interact with debug consoles
-- **Power control** -- voltage/current management with safety tiers
-- **GPIO control** -- toggle pins for bootloader entry (ESP32, ESP8266, etc.)
-- **Flash extraction** -- dump firmware through UART bridge via esptool
-- **Engagement logging** -- timestamped raw logs, per-engagement folders, config.json
+- **UART probing:** detect baud rates, capture serial output, interact with debug consoles
+- **Power control:** voltage/current management with safety tiers
+- **GPIO control:** toggle pins for bootloader entry (ESP32, ESP8266, etc.)
+- **Flash extraction:** dump firmware through UART bridge via esptool
+- **Engagement logging:** timestamped raw logs, per-engagement folders, config.json
 
 ## Requirements
 
@@ -70,9 +70,9 @@ Set `PIDEV_ENGAGEMENTS_DIR` environment variable to control where engagement log
 
 Three tiers enforced at the MCP server boundary:
 
-- **read-only** -- full autonomy, no side effects
-- **allowed-write** -- autonomous execution, all calls logged
-- **approval-write** -- blocks until human confirms via `_confirmed` parameter. Wrong voltage fries chips.
+- **read-only:** full autonomy, no side effects
+- **allowed-write:** autonomous execution, all calls logged
+- **approval-write:** blocks until human confirms via `_confirmed` parameter. Wrong voltage fries chips.
 
 ## BusPirate 6 Setup
 
@@ -94,10 +94,10 @@ Free pins (IO0-IO3, IO6-IO7) can be used for GPIO control (bootloader entry, res
 
 ### Known limitations
 
-- **Bridge mode exit:** After flash dump operations, bridge mode stays active. Press the physical BP6 button or USB-replug to exit.
+- **Bridge mode exit:** after flash dump operations, bridge mode stays active. Press the physical BP6 button or USB-replug to exit.
 - **Dual-port operation:** BPIO2 (binary port) and bridge mode (terminal port) cannot operate simultaneously.
-- **Baud scan timing:** Fast-booting targets may finish output before the scan reaches the correct rate.
-- **Port numbering:** The binary port number may change after USB replug (ACM1 -> ACM2). The server auto-detects.
+- **Baud scan timing:** fast-booting targets may finish output before the scan reaches the correct rate.
+- **Port numbering:** the binary port number may change after USB replug (ACM1 -> ACM2). The server auto-detects.
 
 ## Tests
 
