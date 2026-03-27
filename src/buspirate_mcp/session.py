@@ -99,35 +99,45 @@ class SessionManager:
         baud: int,
         pins: dict[str, str],
         device_path: str = "",
+        project_path: str | None = None,
     ) -> Session:
         """Create a new engagement session with logging directory."""
-        sanitized = _sanitize_name(name)
-        if not sanitized:
-            sanitized = "unnamed"
-        timestamp = datetime.now().strftime("%d-%m-%Y-%H-%M")
+        if project_path is not None:
+            resolved = Path(project_path).resolve()
+            if not resolved.is_relative_to(self._engagements_dir.resolve()):
+                raise ValueError("project_path must be under engagements directory")
+            engagement_path = resolved / "uart"
+            engagement_path.mkdir(parents=True, exist_ok=True)
+            (engagement_path / "logs").mkdir(exist_ok=True)
+            (engagement_path / "artifacts").mkdir(exist_ok=True)
+        else:
+            sanitized = _sanitize_name(name)
+            if not sanitized:
+                sanitized = "unnamed"
+            timestamp = datetime.now().strftime("%d-%m-%Y-%H-%M")
 
-        # DD-MM-YYYY-HH-MM_BP_<name>
-        folder_name = f"{timestamp}_BP_{sanitized}"
-        engagement_path = self._engagements_dir / folder_name
-        counter = 1
-        while engagement_path.exists():
-            folder_name = f"{timestamp}_BP_{sanitized}-{counter}"
+            # DD-MM-YYYY-HH-MM_BP_<name>
+            folder_name = f"{timestamp}_BP_{sanitized}"
             engagement_path = self._engagements_dir / folder_name
-            counter += 1
-        (engagement_path / "logs").mkdir(parents=True, exist_ok=True)
-        (engagement_path / "artifacts").mkdir(parents=True, exist_ok=True)
+            counter = 1
+            while engagement_path.exists():
+                folder_name = f"{timestamp}_BP_{sanitized}-{counter}"
+                engagement_path = self._engagements_dir / folder_name
+                counter += 1
+            (engagement_path / "logs").mkdir(parents=True, exist_ok=True)
+            (engagement_path / "artifacts").mkdir(parents=True, exist_ok=True)
 
         session_id = str(uuid.uuid4())[:8]
+        now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         # Write engagement config
         config = {
             "session_id": session_id,
-            "name": sanitized,
-            "date": timestamp,
+            "name": _sanitize_name(name),
             "device_path": device_path,
             "baud": baud,
             "pins": pins,
-            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "created_at": now_ts,
         }
         config_path = engagement_path / "config.json"
         config_path.write_text(json.dumps(config, indent=2) + "\n")

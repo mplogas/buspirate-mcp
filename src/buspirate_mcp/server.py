@@ -106,6 +106,10 @@ TOOL_DEFINITIONS = [
                 "tx_pin": {"type": "integer", "description": "BP IO pin number for TX (e.g., 4)", "default": 4},
                 "rx_pin": {"type": "integer", "description": "BP IO pin number for RX (e.g., 5)", "default": 5},
                 "engagement_name": {"type": "string", "description": "Target device name"},
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/uart/ instead of creating a standalone engagement.",
+                },
             },
             "required": ["baud", "engagement_name"],
         },
@@ -303,6 +307,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 },
                 engagement_name=arguments["engagement_name"],
                 device_path=_hardware_port,
+                project_path=arguments.get("project_path"),
             )
 
         elif name == "read_output":

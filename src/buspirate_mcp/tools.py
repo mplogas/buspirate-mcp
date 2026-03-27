@@ -149,6 +149,7 @@ async def tool_open_uart(
     pins: dict[str, str],
     engagement_name: str,
     device_path: str = "",
+    project_path: str | None = None,
 ) -> dict[str, Any]:
     """Open a persistent UART session and start logging."""
     hardware.configure_uart(speed=baud)
@@ -158,6 +159,7 @@ async def tool_open_uart(
         baud=baud,
         pins=pins,
         device_path=device_path,
+        project_path=project_path,
     )
     return {
         "session_id": session.session_id,
