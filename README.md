@@ -92,6 +92,10 @@ UART mode uses IO4 (TX->) and IO5 (RX<-). The BP6 display is the authoritative s
 
 Free pins (IO0-IO3, IO6-IO7) can be used for GPIO control (bootloader entry, reset) while UART is active.
 
+### Project integration
+
+The `open_uart` tool accepts an optional `project_path` parameter. When provided (from project-mcp's `create_project`), engagement data is written to `<project_path>/uart/` instead of creating a standalone folder. Omit it for standalone use.
+
 ### Known limitations
 
 - **Bridge mode exit:** after flash dump operations, bridge mode stays active. Press the physical BP6 button or USB-replug to exit.
