@@ -1,5 +1,8 @@
 """Tests for the BPIO2 hardware abstraction layer."""
 
+import io
+import sys
+
 import pytest
 from unittest.mock import patch, MagicMock
 from buspirate_mcp.hardware import BusPirateHardware
@@ -185,3 +188,282 @@ class TestDisconnect:
             hw = BusPirateHardware.connect("/dev/ttyACM1")
             hw.disconnect()  # should not raise
             assert hw.uart is None
+
+    def test_disconnect_nulls_all_protocols(self):
+        with patch("buspirate_mcp.hardware.BPIOClient"), \
+             patch("buspirate_mcp.hardware.BPIOUART") as mock_uart_cls:
+            mock_uart = MagicMock()
+            mock_uart_cls.return_value = mock_uart
+
+            hw = BusPirateHardware.connect("/dev/ttyACM1")
+            hw.spi = MagicMock()
+            hw.i2c = MagicMock()
+            hw.onewire = MagicMock()
+            hw.disconnect()
+            assert hw.spi is None
+            assert hw.i2c is None
+            assert hw.onewire is None
+            assert hw._active_mode is None
+
+
+class TestModeTracking:
+    def _make_hw(self):
+        with patch("buspirate_mcp.hardware.BPIOClient"), \
+             patch("buspirate_mcp.hardware.BPIOUART") as mock_uart_cls:
+            mock_uart = MagicMock()
+            mock_uart_cls.return_value = mock_uart
+            return BusPirateHardware.connect("/dev/ttyACM1")
+
+    def test_initial_mode_is_none(self):
+        hw = self._make_hw()
+        assert hw._active_mode is None
+
+    def test_configure_uart_sets_mode(self):
+        hw = self._make_hw()
+        hw.configure_uart()
+        assert hw._active_mode == "uart"
+
+    def test_check_mode_raises_on_switch(self):
+        hw = self._make_hw()
+        hw._active_mode = "uart"
+        with pytest.raises(RuntimeError, match="Mode 'uart' is active"):
+            hw._check_mode("spi")
+
+    def test_check_mode_allows_same(self):
+        hw = self._make_hw()
+        hw._active_mode = "spi"
+        hw._check_mode("spi")  # should not raise
+
+    def test_reset_mode_allows_switch(self):
+        hw = self._make_hw()
+        hw._active_mode = "uart"
+        hw.reset_mode()
+        assert hw._active_mode is None
+        hw._check_mode("spi")  # should not raise
+
+    def test_active_protocol_returns_uart_by_default(self):
+        hw = self._make_hw()
+        assert hw._active_protocol is hw.uart
+
+    def test_active_protocol_returns_spi(self):
+        hw = self._make_hw()
+        hw.spi = MagicMock()
+        hw._active_mode = "spi"
+        assert hw._active_protocol is hw.spi
+
+    def test_active_protocol_returns_i2c(self):
+        hw = self._make_hw()
+        hw.i2c = MagicMock()
+        hw._active_mode = "i2c"
+        assert hw._active_protocol is hw.i2c
+
+    def test_active_protocol_returns_onewire(self):
+        hw = self._make_hw()
+        hw.onewire = MagicMock()
+        hw._active_mode = "1wire"
+        assert hw._active_protocol is hw.onewire
+
+    def test_psu_uses_active_protocol(self):
+        hw = self._make_hw()
+        mock_spi = MagicMock()
+        mock_spi.set_psu_enable.return_value = True
+        hw.spi = mock_spi
+        hw._active_mode = "spi"
+        hw.set_voltage(3.3, 300)
+        mock_spi.set_psu_enable.assert_called_once_with(
+            voltage_mv=3300, current_ma=300,
+        )
+
+
+class TestSPIOperations:
+    def _make_hw(self):
+        with patch("buspirate_mcp.hardware.BPIOClient"), \
+             patch("buspirate_mcp.hardware.BPIOUART") as mock_uart_cls:
+            mock_uart = MagicMock()
+            mock_uart_cls.return_value = mock_uart
+            return BusPirateHardware.connect("/dev/ttyACM1")
+
+    def test_configure_spi_sets_mode(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIOSPI") as mock_spi_cls:
+            mock_spi = MagicMock()
+            mock_spi_cls.return_value = mock_spi
+            hw.configure_spi(speed=2000000)
+            assert hw._active_mode == "spi"
+            mock_spi.configure.assert_called_once_with(
+                speed=2000000, clock_polarity=False,
+                clock_phase=False, chip_select_idle=True,
+            )
+
+    def test_configure_spi_with_psu(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIOSPI") as mock_spi_cls:
+            mock_spi = MagicMock()
+            mock_spi_cls.return_value = mock_spi
+            hw.configure_spi(voltage_mv=3300, current_ma=200)
+            mock_spi.configure.assert_called_once_with(
+                speed=1000000, clock_polarity=False,
+                clock_phase=False, chip_select_idle=True,
+                psu_enable=True, psu_set_mv=3300, psu_set_ma=200,
+            )
+
+    def test_configure_spi_reuses_existing_object(self):
+        hw = self._make_hw()
+        mock_spi = MagicMock()
+        hw.spi = mock_spi
+        hw.configure_spi()
+        assert hw.spi is mock_spi
+
+    def test_spi_transfer(self):
+        hw = self._make_hw()
+        mock_spi = MagicMock()
+        mock_spi.transfer.return_value = b"\xff"
+        hw.spi = mock_spi
+        hw._active_mode = "spi"
+        result = hw.spi_transfer(b"\x00", read_bytes=1)
+        mock_spi.transfer.assert_called_once_with(
+            write_data=b"\x00", read_bytes=1,
+        )
+        assert result == b"\xff"
+
+    def test_spi_select_deselect(self):
+        hw = self._make_hw()
+        mock_spi = MagicMock()
+        hw.spi = mock_spi
+        hw._active_mode = "spi"
+        hw.spi_select()
+        mock_spi.select.assert_called_once()
+        hw.spi_deselect()
+        mock_spi.deselect.assert_called_once()
+
+    def test_configure_spi_blocked_by_uart_mode(self):
+        hw = self._make_hw()
+        hw.configure_uart()
+        with pytest.raises(RuntimeError, match="Mode 'uart' is active"):
+            hw.configure_spi()
+
+
+class TestI2COperations:
+    def _make_hw(self):
+        with patch("buspirate_mcp.hardware.BPIOClient"), \
+             patch("buspirate_mcp.hardware.BPIOUART") as mock_uart_cls:
+            mock_uart = MagicMock()
+            mock_uart_cls.return_value = mock_uart
+            return BusPirateHardware.connect("/dev/ttyACM1")
+
+    def test_configure_i2c_sets_mode_with_pullups(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIOI2C") as mock_i2c_cls:
+            mock_i2c = MagicMock()
+            mock_i2c_cls.return_value = mock_i2c
+            hw.configure_i2c(speed=100000)
+            assert hw._active_mode == "i2c"
+            mock_i2c.configure.assert_called_once_with(
+                speed=100000, clock_stretch=False,
+                pullup_enable=True,
+            )
+
+    def test_configure_i2c_with_psu(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIOI2C") as mock_i2c_cls:
+            mock_i2c = MagicMock()
+            mock_i2c_cls.return_value = mock_i2c
+            hw.configure_i2c(voltage_mv=3300, current_ma=150)
+            mock_i2c.configure.assert_called_once_with(
+                speed=400000, clock_stretch=False,
+                pullup_enable=True,
+                psu_enable=True, psu_set_mv=3300, psu_set_ma=150,
+            )
+
+    def test_i2c_transfer(self):
+        hw = self._make_hw()
+        mock_i2c = MagicMock()
+        mock_i2c.transfer.return_value = b"\xab"
+        hw.i2c = mock_i2c
+        hw._active_mode = "i2c"
+        result = hw.i2c_transfer(b"\x50", read_bytes=1)
+        mock_i2c.transfer.assert_called_once_with(
+            write_data=b"\x50", read_bytes=1,
+        )
+        assert result == b"\xab"
+
+    def test_i2c_scan_suppresses_stdout(self):
+        hw = self._make_hw()
+        mock_i2c = MagicMock()
+
+        def noisy_scan(start_addr=0, end_addr=0x7F):
+            print("Scanning...")  # this must not reach real stdout
+            return [0x48, 0x50]
+
+        mock_i2c.scan = noisy_scan
+        hw.i2c = mock_i2c
+        hw._active_mode = "i2c"
+
+        # Capture real stdout to verify nothing leaks
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            result = hw.i2c_scan()
+        finally:
+            sys.stdout = old_stdout
+
+        assert result == [0x48, 0x50]
+        assert captured.getvalue() == ""
+
+
+class TestOneWireOperations:
+    def _make_hw(self):
+        with patch("buspirate_mcp.hardware.BPIOClient"), \
+             patch("buspirate_mcp.hardware.BPIOUART") as mock_uart_cls:
+            mock_uart = MagicMock()
+            mock_uart_cls.return_value = mock_uart
+            return BusPirateHardware.connect("/dev/ttyACM1")
+
+    def test_configure_1wire_sets_mode(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIO1Wire") as mock_ow_cls:
+            mock_ow = MagicMock()
+            mock_ow_cls.return_value = mock_ow
+            hw.configure_1wire()
+            assert hw._active_mode == "1wire"
+            mock_ow.configure.assert_called_once_with(pullup_enable=True)
+
+    def test_configure_1wire_with_psu(self):
+        hw = self._make_hw()
+        with patch("buspirate_mcp.hardware.BPIO1Wire") as mock_ow_cls:
+            mock_ow = MagicMock()
+            mock_ow_cls.return_value = mock_ow
+            hw.configure_1wire(voltage_mv=3300, current_ma=50)
+            mock_ow.configure.assert_called_once_with(
+                pullup_enable=True,
+                psu_enable=True, psu_set_mv=3300, psu_set_ma=50,
+            )
+
+    def test_onewire_reset(self):
+        hw = self._make_hw()
+        mock_ow = MagicMock()
+        mock_ow.reset.return_value = True
+        hw.onewire = mock_ow
+        hw._active_mode = "1wire"
+        result = hw.onewire_reset()
+        mock_ow.reset.assert_called_once()
+        assert result is True
+
+    def test_onewire_transfer(self):
+        hw = self._make_hw()
+        mock_ow = MagicMock()
+        mock_ow.transfer.return_value = b"\x28"
+        hw.onewire = mock_ow
+        hw._active_mode = "1wire"
+        result = hw.onewire_transfer(b"\x33", read_bytes=1)
+        mock_ow.transfer.assert_called_once_with(
+            write_data=b"\x33", read_bytes=1,
+        )
+        assert result == b"\x28"
+
+    def test_configure_1wire_blocked_by_spi_mode(self):
+        hw = self._make_hw()
+        hw._active_mode = "spi"
+        with pytest.raises(RuntimeError, match="Mode 'spi' is active"):
+            hw.configure_1wire()
