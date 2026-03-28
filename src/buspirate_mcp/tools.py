@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from buspirate_mcp.hardware import BusPirateHardware
+from buspirate_mcp.la import FALASession
+from buspirate_mcp import la_parsers
 from buspirate_mcp.safety import validate_voltage_range
 from buspirate_mcp.session import SessionManager
 
@@ -1217,3 +1219,207 @@ async def tool_close_spi(
     session_manager.close(session_id)
     hardware.reset_mode()
     return {"closed": True, "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
+# FALA (Follow Along Logic Analyzer) tools
+# ---------------------------------------------------------------------------
+
+
+async def tool_la_prepare(
+    session_manager: SessionManager,
+    hardware: BusPirateHardware,
+    engagement_name: str,
+    protocol: str,
+    protocol_config: dict | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """Switch to FALA mode and enter a bus protocol for capture."""
+    try:
+        # Check no BPIO2 mode is active
+        if hardware._active_mode is not None:
+            return {"error": f"Close the active {hardware._active_mode} session before starting LA"}
+
+        terminal_port = hardware.find_terminal_port()
+        if terminal_port is None:
+            return {"error": "Terminal port not found"}
+
+        # Find the binary/FALA port (the other port)
+        devices = hardware.list_devices()
+        fala_port = None
+        for d in devices:
+            if d["path"] != terminal_port:
+                fala_port = d["path"]
+                break
+        if fala_port is None:
+            return {"error": "FALA port not found"}
+
+        fala = FALASession(terminal_port, fala_port)
+        result = fala.activate(protocol, protocol_config)
+
+        session = session_manager.create(
+            name=engagement_name,
+            hardware=fala,
+            protocol="la",
+            protocol_config={"bus_protocol": protocol, **result},
+            project_path=project_path,
+        )
+
+        return {
+            "session_id": session.session_id,
+            "engagement_path": str(session.engagement_path),
+            "protocol": protocol,
+            "sample_rate_hz": result.get("sample_rate_hz", 0),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+async def tool_la_command(
+    session_manager: SessionManager,
+    session_id: str,
+    command: str,
+) -> dict[str, Any]:
+    """Execute a bus command and capture FALA data."""
+    try:
+        session = session_manager.get(session_id)
+        fala = session.hardware  # FALASession stored here
+
+        result = fala.execute(command)
+
+        # Save raw capture to artifacts if we got samples
+        capture_info = result.get("capture", {})
+        raw = capture_info.get("raw", b'')
+        raw_file = None
+        if raw:
+            artifacts_dir = session.engagement_path / "artifacts"
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            # Find next capture number
+            existing = list(artifacts_dir.glob("capture_*.bin"))
+            num = len(existing) + 1
+            capture_path = artifacts_dir / f"capture_{num:03d}.bin"
+            capture_path.write_bytes(raw)
+            raw_file = str(capture_path.relative_to(session.engagement_path))
+
+        # Log the transaction
+        notification = capture_info.get("notification", {})
+        session.log_transaction(
+            operation="la_command",
+            write_hex=command,
+            read_hex="",
+            metadata={
+                "terminal_output": result.get("terminal_output", ""),
+                "samples": notification.get("samples", 0) if notification else 0,
+                "sample_rate_hz": notification.get("sample_rate_hz", 0) if notification else 0,
+                "raw_file": raw_file,
+            },
+        )
+
+        return {
+            "terminal_output": result.get("terminal_output", ""),
+            "capture": {
+                "samples": notification.get("samples", 0) if notification else 0,
+                "sample_rate_hz": notification.get("sample_rate_hz", 0) if notification else 0,
+                "duration_us": round(notification["samples"] / notification["sample_rate_hz"] * 1_000_000, 2) if notification and notification.get("sample_rate_hz", 0) > 0 else 0,
+                "raw_file": raw_file,
+                "raw_bytes": len(raw),
+            },
+        }
+    except KeyError:
+        return {"error": f"Session not found: {session_id}"}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+async def tool_la_analyze(
+    session_manager: SessionManager,
+    session_id: str,
+    capture_file: str | None = None,
+    channels: list[int] | None = None,
+) -> dict[str, Any]:
+    """Analyze a FALA capture for signal characteristics."""
+    try:
+        session = session_manager.get(session_id)
+        artifacts_dir = session.engagement_path / "artifacts"
+
+        # Find capture file
+        if capture_file:
+            path = session.engagement_path / capture_file
+        else:
+            # Use latest capture
+            captures = sorted(artifacts_dir.glob("capture_*.bin"))
+            if not captures:
+                return {"error": "No capture files found"}
+            path = captures[-1]
+
+        raw = path.read_bytes()
+        if not raw:
+            return {"error": "Capture file is empty"}
+
+        # Get sample rate from session config or default
+        config = session.protocol if hasattr(session, 'protocol') else None
+        sample_rate = 75_000_000  # default
+
+        result = la_parsers.analyze_channels(raw, sample_rate, channels)
+        result["capture_file"] = str(path.relative_to(session.engagement_path))
+        return result
+    except KeyError:
+        return {"error": f"Session not found: {session_id}"}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+async def tool_la_identify(
+    session_manager: SessionManager,
+    session_id: str,
+    capture_file: str | None = None,
+) -> dict[str, Any]:
+    """Auto-identify protocols from a FALA capture."""
+    try:
+        session = session_manager.get(session_id)
+        artifacts_dir = session.engagement_path / "artifacts"
+
+        if capture_file:
+            path = session.engagement_path / capture_file
+        else:
+            captures = sorted(artifacts_dir.glob("capture_*.bin"))
+            if not captures:
+                return {"error": "No capture files found"}
+            path = captures[-1]
+
+        raw = path.read_bytes()
+        if not raw:
+            return {"error": "Capture file is empty"}
+
+        sample_rate = 75_000_000
+        analysis = la_parsers.analyze_channels(raw, sample_rate)
+        candidates = la_parsers.identify_protocol(analysis)
+
+        return {
+            "candidates": candidates,
+            "count": len(candidates),
+            "capture_file": str(path.relative_to(session.engagement_path)),
+        }
+    except KeyError:
+        return {"error": f"Session not found: {session_id}"}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+async def tool_la_cleanup(
+    session_manager: SessionManager,
+    session_id: str,
+) -> dict[str, Any]:
+    """Deactivate FALA and restore BPIO2 mode."""
+    try:
+        session = session_manager.get(session_id)
+        fala = session.hardware
+
+        fala.deactivate()
+        session_manager.close(session_id)
+
+        return {"restored": True, "session_id": session_id}
+    except KeyError:
+        return {"error": f"Session not found: {session_id}"}
+    except Exception as exc:
+        return {"error": str(exc)}

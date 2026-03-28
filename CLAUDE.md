@@ -26,8 +26,8 @@ Only `hardware.py` imports from the BPIO2 SDK. Everything else talks to `hardwar
 
 Three tiers enforced at the MCP server boundary:
 
-- **read-only**: full autonomy (list_devices, verify_connection, scan_baud, read_output, spi_probe, spi_read, spi_dump, spi_transfer, i2c_scan, i2c_read, i2c_dump, onewire_search, onewire_read)
-- **allowed-write**: autonomous but logged (open_uart, send_command, close_uart, enter_download_mode, read_flash, open_spi, close_spi, open_i2c, close_i2c, open_1wire, close_1wire)
+- **read-only**: full autonomy (list_devices, verify_connection, scan_baud, read_output, spi_probe, spi_read, spi_dump, spi_transfer, i2c_scan, i2c_read, i2c_dump, onewire_search, onewire_read, la_command, la_analyze, la_identify)
+- **allowed-write**: autonomous but logged (open_uart, send_command, close_uart, enter_download_mode, read_flash, open_spi, close_spi, open_i2c, close_i2c, open_1wire, close_1wire, la_prepare, la_cleanup)
 - **approval-write**: blocks until human confirms via _confirmed token (set_voltage, set_power, spi_write, i2c_write)
 
 Wrong voltage fries chips. Writing SPI flash or I2C devices overwrites data irreversibly. Do not bypass or weaken the approval-write gate.
@@ -78,6 +78,19 @@ Free IO pins (IO0-IO3, IO6-IO7) can be used for GPIO control while UART mode is 
 
 **Important:** BPIO2 (ACM1) and terminal bridge mode (ACM0) cannot operate simultaneously. The firmware locks up. Use BPIO2 for GPIO setup, then switch to terminal for bridge mode.
 
+### Follow Along Logic Analyzer (FALA)
+
+FALA (binmode 4) auto-captures bus activity on all 8 IO pins every time a bus command runs on the terminal. It runs alongside active bus commands, providing raw signal capture.
+
+- FALA uses ACM1 for capture data while bus commands run on ACM0 (terminal)
+- Binmode switch: BPIO2 (2) -> FALA (4) -> BPIO2 (2), all via terminal, no USB replug
+- Notification format: `$FALADATA;8;0;0;N;75000000;7468;0;` (semicolon-delimited)
+- Raw dump via `+` on ACM1: 1 byte per sample, 8 channels per bit, 75 MHz sample rate
+- `la.py` is the ONLY module that manages FALA serial ports (same pattern as hardware.py for BPIO2)
+- `la_parsers.py` handles signal analysis and protocol identification
+
+FALA and BPIO2 are mutually exclusive (both use ACM1). Close all BPIO2 sessions before switching to FALA.
+
 ### Flash dumping via UART bridge
 
 The BP6 `bridge` command creates a transparent serial passthrough on ACM0. esptool.py can read/write flash through this bridge using `--before no-reset --after no-reset --no-stub`. Baud rates above 460800 risk buffer overruns in bridge mode.
@@ -106,7 +119,7 @@ pip install -e ".[dev]"
 # Run server (stdio transport, spawned by MCP client)
 python -m buspirate_mcp
 
-# Tests (no hardware needed, 77 tests)
+# Tests (no hardware needed)
 pytest
 
 # Integration tests (BusPirate must be connected)

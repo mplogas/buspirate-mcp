@@ -141,6 +141,7 @@ _PROTOCOL_FOLDER_PREFIX = {
     "spi": "SPI",
     "i2c": "I2C",
     "1wire": "1W",
+    "la": "LA",
 }
 
 # Subfolder name when nested under a project path.
@@ -149,6 +150,7 @@ _PROTOCOL_PROJECT_SUBDIR = {
     "spi": "spi",
     "i2c": "i2c",
     "1wire": "onewire",
+    "la": "la",
 }
 
 
