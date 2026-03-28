@@ -1,6 +1,7 @@
 """Tests for MCP tool implementations."""
 
 import pytest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from buspirate_mcp.tools import (
     tool_list_devices,
@@ -376,8 +377,7 @@ class TestReadFlash:
     @pytest.mark.asyncio
     async def test_success_returns_output_path(self, tmp_path):
         mock_hw = MagicMock()
-        output = tmp_path / "dump.bin"
-        output.write_bytes(b'\xff' * 4096)
+        output = tmp_path / "subdir" / "dump.bin"
         with patch("buspirate_mcp.tools._enter_bridge_mode", return_value=True), \
              patch("buspirate_mcp.tools.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
@@ -391,7 +391,8 @@ class TestReadFlash:
                 output_path=str(output),
             )
             assert result["status"] == "success"
-            assert result["bytes_read"] == 4096
+            # Path traversal prevention: directory components stripped
+            assert Path(result["output_path"]).name == "dump.bin"
 
 
 class TestOpen1Wire:

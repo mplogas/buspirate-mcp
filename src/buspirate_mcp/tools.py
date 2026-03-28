@@ -330,6 +330,11 @@ async def tool_enter_download_mode(
     boot_pin. Works for ESP32, ESP8266, and other chips with UART
     bootloaders triggered by a strapping pin.
     """
+    if not isinstance(boot_pin, int) or boot_pin < 0 or boot_pin > 7:
+        return {"error": f"boot_pin must be 0-7, got: {boot_pin}"}
+    if not isinstance(reset_pin, int) or reset_pin < 0 or reset_pin > 7:
+        return {"error": f"reset_pin must be 0-7, got: {reset_pin}"}
+
     # Hold boot select pin LOW
     hardware.set_pin_output(boot_pin, high=False)
     await asyncio.sleep(0.3)
@@ -448,6 +453,15 @@ async def tool_read_flash(
     provided. Then enters bridge mode on the terminal port and runs
     esptool read-flash.
     """
+    # Validate pin numbers when they are being used
+    if boot_pin >= 0 and (not isinstance(boot_pin, int) or boot_pin > 7):
+        return {"error": f"boot_pin must be 0-7, got: {boot_pin}"}
+    if reset_pin >= 0 and (not isinstance(reset_pin, int) or reset_pin > 7):
+        return {"error": f"reset_pin must be 0-7, got: {reset_pin}"}
+
+    # Sanitize output_path: strip directory components to prevent path traversal
+    output_path = Path(output_path).name
+
     # Step 1: Enter download mode if pins provided
     if boot_pin >= 0 and reset_pin >= 0:
         dl_result = await tool_enter_download_mode(
@@ -1058,7 +1072,8 @@ async def tool_spi_dump(
 
     artifacts_dir = session.engagement_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    out_path = artifacts_dir / output_filename
+    safe_name = Path(output_filename).name
+    out_path = artifacts_dir / safe_name
 
     collected = bytearray()
     addr = 0
@@ -1347,7 +1362,9 @@ async def tool_la_analyze(
 
         # Find capture file
         if capture_file:
-            path = session.engagement_path / capture_file
+            path = Path(capture_file).resolve() if Path(capture_file).is_absolute() else (session.engagement_path / capture_file).resolve()
+            if not path.is_relative_to(session.engagement_path.resolve()):
+                return {"error": f"Path must be under engagement directory: {capture_file}"}
         else:
             # Use latest capture
             captures = sorted(artifacts_dir.glob("capture_*.bin"))
@@ -1383,7 +1400,9 @@ async def tool_la_identify(
         artifacts_dir = session.engagement_path / "artifacts"
 
         if capture_file:
-            path = session.engagement_path / capture_file
+            path = Path(capture_file).resolve() if Path(capture_file).is_absolute() else (session.engagement_path / capture_file).resolve()
+            if not path.is_relative_to(session.engagement_path.resolve()):
+                return {"error": f"Path must be under engagement directory: {capture_file}"}
         else:
             captures = sorted(artifacts_dir.glob("capture_*.bin"))
             if not captures:

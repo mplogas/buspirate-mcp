@@ -169,8 +169,15 @@ class BusPirateHardware:
             )
         return proto.set_psu_disable()
 
+    @staticmethod
+    def _validate_pin(pin: int) -> None:
+        """Raise ValueError if pin is not a valid IO pin number (0-7)."""
+        if not isinstance(pin, int) or pin < 0 or pin > 7:
+            raise ValueError(f"Pin must be 0-7, got: {pin}")
+
     def configure_pin_input(self, pin: int) -> None:
         """Configure a pin as digital input for reading."""
+        self._validate_pin(pin)
         proto = self._active_protocol
         mask = 1 << pin
         proto.set_io_direction(direction_mask=mask, direction=0)
@@ -181,6 +188,7 @@ class BusPirateHardware:
 
     def set_pin_output(self, pin: int, high: bool) -> None:
         """Set a pin as output and drive it high or low."""
+        self._validate_pin(pin)
         proto = self._active_protocol
         mask = 1 << pin
         proto.set_io_direction(direction_mask=mask, direction=mask)
@@ -188,6 +196,7 @@ class BusPirateHardware:
 
     def release_pin(self, pin: int) -> None:
         """Release a pin back to input (high-impedance)."""
+        self._validate_pin(pin)
         proto = self._active_protocol
         mask = 1 << pin
         proto.set_io_direction(direction_mask=mask, direction=0)
