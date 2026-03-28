@@ -11,6 +11,7 @@ class TestClassifyTool:
             "spi_probe", "spi_read", "spi_dump", "spi_transfer",
             "i2c_scan", "i2c_read", "i2c_dump",
             "onewire_search", "onewire_read",
+            "la_command", "la_analyze", "la_identify",
         ]:
             assert classify_tool(tool) == SafetyTier.READ_ONLY
 
@@ -21,6 +22,7 @@ class TestClassifyTool:
             "open_spi", "close_spi",
             "open_i2c", "close_i2c",
             "open_1wire", "close_1wire",
+            "la_prepare", "la_cleanup",
         ]:
             assert classify_tool(tool) == SafetyTier.ALLOWED_WRITE
 

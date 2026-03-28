@@ -533,6 +533,115 @@ TOOL_DEFINITIONS = [
             "required": ["session_id"],
         },
     ),
+    # --- Logic Analyzer (FALA) tools ---
+    Tool(
+        name="la_prepare",
+        description=(
+            "Switch to FALA (Follow Along Logic Analyzer) mode and enter a bus "
+            "protocol for signal capture. Disconnects BPIO2. Captures all 8 IO pins "
+            "at up to 75 MHz every time a bus command runs. [allowed-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "engagement_name": {
+                    "type": "string",
+                    "description": "Name for the LA engagement",
+                },
+                "protocol": {
+                    "type": "string",
+                    "enum": ["spi", "i2c", "uart", "1wire"],
+                    "description": "Bus protocol to use for terminal commands",
+                },
+                "protocol_config": {
+                    "type": "object",
+                    "description": "Protocol-specific configuration (speed, mode, etc.)",
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to a project folder (from project-mcp)",
+                },
+            },
+            "required": ["engagement_name", "protocol"],
+        },
+    ),
+    Tool(
+        name="la_command",
+        description=(
+            "Execute a bus command on the terminal and capture FALA data. "
+            "Uses BP6 terminal syntax: SPI [0x9f r:3], I2C [0xa0 0x00 r:16], etc. "
+            "Returns both decoded terminal output and raw signal capture. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID from la_prepare",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Bus command in BP6 terminal syntax",
+                },
+            },
+            "required": ["session_id", "command"],
+        },
+    ),
+    Tool(
+        name="la_analyze",
+        description=(
+            "Analyze a FALA capture for signal characteristics: transitions, frequency, "
+            "duty cycle, idle state, and role identification per channel. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "capture_file": {
+                    "type": "string",
+                    "description": "Capture file path relative to engagement (default: latest)",
+                },
+                "channels": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Channel numbers to analyze (default: all 8)",
+                },
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="la_identify",
+        description=(
+            "Auto-identify bus protocols from a FALA capture using signal heuristics. "
+            "Returns ranked candidates with confidence scores and channel mappings. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "capture_file": {
+                    "type": "string",
+                    "description": "Capture file path (default: latest)",
+                },
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="la_cleanup",
+        description=(
+            "Deactivate FALA and restore BPIO2 mode. After this call, BPIO2 tools "
+            "(SPI, I2C, UART, 1-Wire) are available again. [allowed-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
 ]
 
 
@@ -805,6 +914,51 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 session_id=arguments["session_id"],
                 hardware=_get_hardware(),
             )
+
+        # --- Logic Analyzer (FALA) ---
+        elif name == "la_prepare":
+            # Disconnect BPIO2 before switching to FALA binmode
+            hw = None
+            if _hardware is not None:
+                _hardware.disconnect()
+            _hardware = None
+            result = await tools.tool_la_prepare(
+                session_manager=session_manager,
+                engagement_name=arguments["engagement_name"],
+                protocol=arguments["protocol"],
+                protocol_config=arguments.get("protocol_config"),
+                project_path=arguments.get("project_path"),
+            )
+
+        elif name == "la_command":
+            result = await tools.tool_la_command(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                command=arguments["command"],
+            )
+
+        elif name == "la_analyze":
+            result = await tools.tool_la_analyze(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                capture_file=arguments.get("capture_file"),
+                channels=arguments.get("channels"),
+            )
+
+        elif name == "la_identify":
+            result = await tools.tool_la_identify(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                capture_file=arguments.get("capture_file"),
+            )
+
+        elif name == "la_cleanup":
+            result = await tools.tool_la_cleanup(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+            )
+            # Clear hardware so next BPIO2 call re-detects
+            _hardware = None
 
         else:
             result = {"error": f"Unknown tool: {name}"}

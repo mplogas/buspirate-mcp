@@ -49,6 +49,12 @@ _TOOL_TIERS: dict[str, SafetyTier] = {
     "onewire_search": SafetyTier.READ_ONLY,
     "onewire_read": SafetyTier.READ_ONLY,
     "close_1wire": SafetyTier.ALLOWED_WRITE,
+    # Logic Analyzer (FALA)
+    "la_prepare": SafetyTier.ALLOWED_WRITE,
+    "la_command": SafetyTier.READ_ONLY,
+    "la_analyze": SafetyTier.READ_ONLY,
+    "la_identify": SafetyTier.READ_ONLY,
+    "la_cleanup": SafetyTier.ALLOWED_WRITE,
 }
 
 
