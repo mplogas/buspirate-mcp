@@ -1133,8 +1133,11 @@ async def tool_spi_write(
     if erase:
         hw.spi_transfer([SPI_CMD_WRITE_ENABLE], 0)
         hw.spi_transfer([SPI_CMD_CHIP_ERASE], 0)
-        # Poll WIP bit until erase completes
+        # Poll WIP bit until erase completes (120s deadline for damaged chips)
+        erase_deadline = time.monotonic() + 120
         while True:
+            if time.monotonic() > erase_deadline:
+                return {"error": "Chip erase timeout: WIP bit stuck after 120s"}
             status = hw.spi_transfer([SPI_CMD_READ_STATUS], 1)
             if not (bytes(status)[0] & SPI_STATUS_WIP):
                 break
@@ -1154,8 +1157,13 @@ async def tool_spi_write(
             addr & 0xFF,
         ] + list(page)
         hw.spi_transfer(cmd, 0)
-        # Poll WIP
+        # Poll WIP (5s deadline per page)
+        page_deadline = time.monotonic() + 5
         while True:
+            if time.monotonic() > page_deadline:
+                return {
+                    "error": f"Page program timeout at addr 0x{addr:06x}: WIP bit stuck after 5s"
+                }
             status = hw.spi_transfer([SPI_CMD_READ_STATUS], 1)
             if not (bytes(status)[0] & SPI_STATUS_WIP):
                 break
