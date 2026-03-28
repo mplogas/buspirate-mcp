@@ -3,7 +3,12 @@
 import json
 import re
 import pytest
-from buspirate_mcp.session import SessionManager, Session, _clean_text
+from buspirate_mcp.session import (
+    SessionManager,
+    Session,
+    TransactionSession,
+    _clean_text,
+)
 
 
 class TestCleanText:
@@ -219,3 +224,164 @@ class TestSessionLogging:
         content = log_path.read_text()
         assert "\x1b" not in content
         assert "INFO" in content
+
+
+class TestTransactionSession:
+    def test_log_transaction_writes_jsonl(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="spi-dev", hardware=None, protocol="spi",
+        )
+        assert isinstance(session, TransactionSession)
+        session.log_transaction("read_reg", write_hex="0x80", read_hex="0xFF")
+        session.log_transaction("write_reg", write_hex="0x010A")
+        session.close()
+
+        log_path = session.engagement_path / "logs" / "spi-commands.jsonl"
+        lines = log_path.read_text().strip().split("\n")
+        assert len(lines) == 2
+
+        entry0 = json.loads(lines[0])
+        assert entry0["operation"] == "read_reg"
+        assert entry0["tx"] == "0x80"
+        assert entry0["rx"] == "0xFF"
+        assert "timestamp" in entry0
+
+        entry1 = json.loads(lines[1])
+        assert entry1["operation"] == "write_reg"
+        assert entry1["rx"] == ""
+
+    def test_log_transaction_with_metadata(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="i2c-dev", hardware=None, protocol="i2c")
+        session.log_transaction(
+            "read", write_hex="0x50", metadata={"addr": "0x28"},
+        )
+        session.close()
+
+        log_path = session.engagement_path / "logs" / "i2c-commands.jsonl"
+        entry = json.loads(log_path.read_text().strip())
+        assert entry["meta"] == {"addr": "0x28"}
+
+    def test_log_after_close_raises(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="closed", hardware=None, protocol="spi")
+        session.close()
+        with pytest.raises(ValueError):
+            session.log_transaction("read", write_hex="0x00")
+
+    def test_double_close_is_safe(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="dbl", hardware=None, protocol="spi")
+        session.close()
+        session.close()  # should not raise
+
+
+class TestProtocolSessionCreation:
+    def test_spi_creates_transaction_session(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="flash-chip", hardware=None, protocol="spi")
+        assert isinstance(session, TransactionSession)
+        assert session.protocol == "spi"
+
+    def test_spi_folder_name(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="eeprom", hardware=None, protocol="spi")
+        assert re.match(
+            r"\d{2}-\d{2}-\d{4}-\d{2}-\d{2}_SPI_", session.engagement_path.name
+        )
+
+    def test_i2c_folder_name(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="sensor", hardware=None, protocol="i2c")
+        assert re.match(
+            r"\d{2}-\d{2}-\d{4}-\d{2}-\d{2}_I2C_", session.engagement_path.name
+        )
+
+    def test_1wire_folder_name(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="temp", hardware=None, protocol="1wire")
+        assert re.match(
+            r"\d{2}-\d{2}-\d{4}-\d{2}-\d{2}_1W_", session.engagement_path.name
+        )
+
+    def test_uart_still_creates_session(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="router", hardware=None, protocol="uart",
+            baud=115200, pins={"tx": 4, "rx": 5},
+        )
+        assert isinstance(session, Session)
+        assert re.match(
+            r"\d{2}-\d{2}-\d{4}-\d{2}-\d{2}_BP_", session.engagement_path.name
+        )
+
+    def test_config_json_includes_protocol(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(name="dev", hardware=None, protocol="spi")
+        config = json.loads(
+            (session.engagement_path / "config.json").read_text()
+        )
+        assert config["protocol"] == "spi"
+        assert "protocol_config" in config
+        assert "baud" not in config
+
+    def test_uart_config_has_baud_not_protocol_config(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="dev", hardware=None, protocol="uart",
+            baud=9600, pins={"tx": 4, "rx": 5},
+        )
+        config = json.loads(
+            (session.engagement_path / "config.json").read_text()
+        )
+        assert config["protocol"] == "uart"
+        assert config["baud"] == 9600
+        assert "protocol_config" not in config
+
+    def test_project_path_spi(self, tmp_path):
+        project = tmp_path / "project-001"
+        project.mkdir()
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="dev", hardware=None, protocol="spi",
+            project_path=str(project),
+        )
+        assert session.engagement_path == project / "spi"
+        assert (project / "spi" / "logs").is_dir()
+
+    def test_project_path_i2c(self, tmp_path):
+        project = tmp_path / "project-002"
+        project.mkdir()
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="dev", hardware=None, protocol="i2c",
+            project_path=str(project),
+        )
+        assert session.engagement_path == project / "i2c"
+
+    def test_project_path_1wire(self, tmp_path):
+        project = tmp_path / "project-003"
+        project.mkdir()
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="dev", hardware=None, protocol="1wire",
+            project_path=str(project),
+        )
+        assert session.engagement_path == project / "onewire"
+
+    def test_unknown_protocol_raises(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        with pytest.raises(ValueError, match="Unknown protocol"):
+            mgr.create(name="bad", hardware=None, protocol="jtag")
+
+    def test_protocol_config_in_config_json(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        session = mgr.create(
+            name="dev", hardware=None, protocol="spi",
+            protocol_config={"mode": 0, "freq_khz": 1000},
+        )
+        config = json.loads(
+            (session.engagement_path / "config.json").read_text()
+        )
+        assert config["protocol_config"] == {"mode": 0, "freq_khz": 1000}

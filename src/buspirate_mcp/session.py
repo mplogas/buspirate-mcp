@@ -1,4 +1,4 @@
-"""UART session management and raw logging."""
+"""Session management and logging for UART and bus protocols (SPI, I2C, 1-Wire)."""
 
 from __future__ import annotations
 
@@ -85,28 +85,102 @@ class Session:
         self._log_file = None
 
 
+class TransactionSession:
+    """Session for discrete bus transactions (SPI, I2C, 1-Wire). Logs to JSONL."""
+
+    def __init__(
+        self,
+        session_id: str,
+        engagement_path: Path,
+        hardware: Any,
+        protocol: str,
+    ) -> None:
+        self.session_id = session_id
+        self.engagement_path = Path(engagement_path)
+        self.hardware = hardware
+        self.protocol = protocol
+        self.connected = True
+        log_name = f"{protocol}-commands.jsonl"
+        self._log_file = (self.engagement_path / "logs" / log_name).open(
+            "a", encoding="utf-8"
+        )
+
+    def log_transaction(
+        self,
+        operation: str,
+        write_hex: str = "",
+        read_hex: str = "",
+        metadata: dict | None = None,
+    ) -> None:
+        """Log a bus transaction as a JSONL line."""
+        if not self.connected:
+            raise ValueError("Session is disconnected")
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "operation": operation,
+            "tx": write_hex,
+            "rx": read_hex,
+        }
+        if metadata:
+            entry["meta"] = metadata
+        self._log_file.write(json.dumps(entry) + "\n")
+        self._log_file.flush()
+
+    def close(self) -> None:
+        """Close the log file and mark session as disconnected. Safe to call twice."""
+        if not self.connected:
+            return
+        self.connected = False
+        self._log_file.close()
+        self._log_file = None
+
+
+# Protocol prefix for standalone engagement folder names.
+_PROTOCOL_FOLDER_PREFIX = {
+    "uart": "BP",
+    "spi": "SPI",
+    "i2c": "I2C",
+    "1wire": "1W",
+}
+
+# Subfolder name when nested under a project path.
+_PROTOCOL_PROJECT_SUBDIR = {
+    "uart": "uart",
+    "spi": "spi",
+    "i2c": "i2c",
+    "1wire": "onewire",
+}
+
+
 class SessionManager:
-    """Manages active UART sessions."""
+    """Manages active UART and bus protocol sessions."""
 
     def __init__(self, engagements_dir: Path | str) -> None:
         self._engagements_dir = Path(engagements_dir)
-        self._sessions: dict[str, Session] = {}
+        self._sessions: dict[str, Session | TransactionSession] = {}
 
     def create(
         self,
         name: str,
         hardware: Any,
-        baud: int,
-        pins: dict[str, str],
+        baud: int = 0,
+        pins: dict[str, str] | None = None,
         device_path: str = "",
         project_path: str | None = None,
-    ) -> Session:
+        protocol: str = "uart",
+        protocol_config: dict | None = None,
+    ) -> Session | TransactionSession:
         """Create a new engagement session with logging directory."""
+        prefix = _PROTOCOL_FOLDER_PREFIX.get(protocol)
+        if prefix is None:
+            raise ValueError(f"Unknown protocol: {protocol}")
+
         if project_path is not None:
             resolved = Path(project_path).resolve()
             if not resolved.is_relative_to(self._engagements_dir.resolve()):
                 raise ValueError("project_path must be under engagements directory")
-            engagement_path = resolved / "uart"
+            subdir = _PROTOCOL_PROJECT_SUBDIR[protocol]
+            engagement_path = resolved / subdir
             engagement_path.mkdir(parents=True, exist_ok=True)
             (engagement_path / "logs").mkdir(exist_ok=True)
             (engagement_path / "artifacts").mkdir(exist_ok=True)
@@ -116,12 +190,11 @@ class SessionManager:
                 sanitized = "unnamed"
             timestamp = datetime.now().strftime("%d-%m-%Y-%H-%M")
 
-            # DD-MM-YYYY-HH-MM_BP_<name>
-            folder_name = f"{timestamp}_BP_{sanitized}"
+            folder_name = f"{timestamp}_{prefix}_{sanitized}"
             engagement_path = self._engagements_dir / folder_name
             counter = 1
             while engagement_path.exists():
-                folder_name = f"{timestamp}_BP_{sanitized}-{counter}"
+                folder_name = f"{timestamp}_{prefix}_{sanitized}-{counter}"
                 engagement_path = self._engagements_dir / folder_name
                 counter += 1
             (engagement_path / "logs").mkdir(parents=True, exist_ok=True)
@@ -131,28 +204,43 @@ class SessionManager:
         now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         # Write engagement config
-        config = {
+        config: dict[str, Any] = {
             "session_id": session_id,
             "name": _sanitize_name(name),
             "device_path": device_path,
-            "baud": baud,
-            "pins": pins,
+            "protocol": protocol,
             "created_at": now_ts,
         }
+
+        if protocol == "uart":
+            config["baud"] = baud
+            config["pins"] = pins or {}
+        else:
+            config["protocol_config"] = protocol_config or {}
+
         config_path = engagement_path / "config.json"
         config_path.write_text(json.dumps(config, indent=2) + "\n")
 
-        session = Session(
-            session_id=session_id,
-            engagement_path=engagement_path,
-            hardware=hardware,
-            baud=baud,
-            pins=pins,
-        )
+        if protocol == "uart":
+            session: Session | TransactionSession = Session(
+                session_id=session_id,
+                engagement_path=engagement_path,
+                hardware=hardware,
+                baud=baud,
+                pins=pins or {},
+            )
+        else:
+            session = TransactionSession(
+                session_id=session_id,
+                engagement_path=engagement_path,
+                hardware=hardware,
+                protocol=protocol,
+            )
+
         self._sessions[session_id] = session
         return session
 
-    def get(self, session_id: str) -> Session:
+    def get(self, session_id: str) -> Session | TransactionSession:
         """Get an active session by ID. Raises KeyError if not found."""
         return self._sessions[session_id]
 
