@@ -6,16 +6,26 @@ from buspirate_mcp.safety import SafetyTier, classify_tool, validate_voltage_ran
 
 class TestClassifyTool:
     def test_read_only_tools(self):
-        for tool in ["list_devices", "verify_connection", "scan_baud", "read_output"]:
+        for tool in [
+            "list_devices", "verify_connection", "scan_baud", "read_output",
+            "spi_probe", "spi_read", "spi_dump", "spi_transfer",
+            "i2c_scan", "i2c_read", "i2c_dump",
+            "onewire_search", "onewire_read",
+        ]:
             assert classify_tool(tool) == SafetyTier.READ_ONLY
 
     def test_allowed_write_tools(self):
-        for tool in ["open_uart", "send_command", "close_uart",
-                      "enter_download_mode", "read_flash"]:
+        for tool in [
+            "open_uart", "send_command", "close_uart",
+            "enter_download_mode", "read_flash",
+            "open_spi", "close_spi",
+            "open_i2c", "close_i2c",
+            "open_1wire", "close_1wire",
+        ]:
             assert classify_tool(tool) == SafetyTier.ALLOWED_WRITE
 
     def test_approval_write_tools(self):
-        for tool in ["set_voltage", "set_power"]:
+        for tool in ["set_voltage", "set_power", "spi_write", "i2c_write"]:
             assert classify_tool(tool) == SafetyTier.APPROVAL_WRITE
 
     def test_unknown_tool_raises(self):

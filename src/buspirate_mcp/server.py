@@ -247,6 +247,292 @@ TOOL_DEFINITIONS = [
             "required": ["size", "output_path"],
         },
     ),
+    # --- SPI tools ---
+    Tool(
+        name="open_spi",
+        description=(
+            "Open an SPI connection and start an engagement. "
+            "Configures SPI mode on the BusPirate, creates engagement folder. [allowed-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "engagement_name": {"type": "string", "description": "Target device name"},
+                "speed": {"type": "integer", "default": 1000000, "description": "SPI clock speed in Hz"},
+                "clock_polarity": {"type": "boolean", "default": False, "description": "CPOL: clock idle state"},
+                "clock_phase": {"type": "boolean", "default": False, "description": "CPHA: data sampling edge"},
+                "chip_select_idle": {"type": "boolean", "default": True, "description": "CS idle state (true=high)"},
+                "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
+                "current_ma": {"type": "integer", "description": "Current limit in mA"},
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/spi/ instead of creating a standalone engagement.",
+                },
+            },
+            "required": ["engagement_name"],
+        },
+    ),
+    Tool(
+        name="spi_probe",
+        description=(
+            "Read JEDEC ID and status register from an SPI flash chip. "
+            "Returns manufacturer, capacity, and write-protect status. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="spi_read",
+        description=(
+            "Read a region of SPI flash memory starting at a given address. "
+            "Saves to artifacts. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "address": {"type": "integer", "description": "Flash address to start reading from"},
+                "length": {"type": "integer", "description": "Number of bytes to read"},
+            },
+            "required": ["session_id", "address", "length"],
+        },
+    ),
+    Tool(
+        name="spi_dump",
+        description=(
+            "Dump the entire SPI flash to a file. Auto-detects size from JEDEC ID "
+            "if not provided. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "size": {"type": "integer", "description": "Flash size in bytes (auto-detected if omitted)"},
+                "output_filename": {"type": "string", "default": "flash_dump.bin", "description": "Output filename"},
+                "chunk_size": {"type": "integer", "default": 512, "description": "Read chunk size in bytes"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="spi_write",
+        description=(
+            "Write a binary file to SPI flash. Optionally erases first and verifies. "
+            "DANGEROUS: overwrites flash contents irreversibly. [approval-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "input_path": {"type": "string", "description": "Path to binary file to write"},
+                "erase": {"type": "boolean", "default": True, "description": "Chip erase before write"},
+                "verify": {"type": "boolean", "default": True, "description": "Read-back verify after write"},
+                "_confirmed": {"type": "boolean", "default": False, "description": "Set true to confirm execution"},
+            },
+            "required": ["session_id", "input_path"],
+        },
+        annotations={"destructiveHint": True, "readOnlyHint": False},
+    ),
+    Tool(
+        name="spi_transfer",
+        description=(
+            "Send a raw SPI transaction. Write hex bytes and optionally read back. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "write_hex": {"type": "string", "description": "Hex string of bytes to send (e.g. '9F')"},
+                "read_bytes": {"type": "integer", "default": 0, "description": "Number of bytes to read back"},
+            },
+            "required": ["session_id", "write_hex"],
+        },
+    ),
+    Tool(
+        name="close_spi",
+        description="Close an SPI session and reset the BusPirate to HiZ mode. [allowed-write]",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    # --- I2C tools ---
+    Tool(
+        name="open_i2c",
+        description=(
+            "Open an I2C connection and start an engagement. "
+            "Configures I2C mode with pullups enabled. [allowed-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "engagement_name": {"type": "string", "description": "Target device name"},
+                "speed": {"type": "integer", "default": 400000, "description": "I2C clock speed in Hz"},
+                "clock_stretch": {"type": "boolean", "default": False, "description": "Enable clock stretching"},
+                "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
+                "current_ma": {"type": "integer", "description": "Current limit in mA"},
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/i2c/ instead of creating a standalone engagement.",
+                },
+            },
+            "required": ["engagement_name"],
+        },
+    ),
+    Tool(
+        name="i2c_scan",
+        description=(
+            "Scan the I2C bus for devices. Returns 7-bit addresses with device hints. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="i2c_read",
+        description=(
+            "Read bytes from an I2C device, optionally from a specific register. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "device_addr": {
+                    "type": ["string", "integer"],
+                    "description": "7-bit device address (hex string like '0x50' or integer)",
+                },
+                "register_addr": {"type": "integer", "description": "Register address to read from (optional)"},
+                "length": {"type": "integer", "default": 1, "description": "Number of bytes to read"},
+            },
+            "required": ["session_id", "device_addr"],
+        },
+    ),
+    Tool(
+        name="i2c_write",
+        description=(
+            "Write bytes to an I2C device register. "
+            "DANGEROUS: may alter device configuration or EEPROM contents. [approval-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "device_addr": {
+                    "type": ["string", "integer"],
+                    "description": "7-bit device address (hex string like '0x50' or integer)",
+                },
+                "register_addr": {"type": "integer", "description": "Register address to write to"},
+                "data_hex": {"type": "string", "description": "Hex string of data bytes to write"},
+                "_confirmed": {"type": "boolean", "default": False, "description": "Set true to confirm execution"},
+            },
+            "required": ["session_id", "device_addr", "register_addr", "data_hex"],
+        },
+        annotations={"destructiveHint": True, "readOnlyHint": False},
+    ),
+    Tool(
+        name="i2c_dump",
+        description=(
+            "Dump memory from an I2C device by reading all registers sequentially. "
+            "Saves to artifacts. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "device_addr": {
+                    "type": ["string", "integer"],
+                    "description": "7-bit device address (hex string like '0x50' or integer)",
+                },
+                "size": {"type": "integer", "default": 256, "description": "Number of bytes to dump"},
+            },
+            "required": ["session_id", "device_addr"],
+        },
+    ),
+    Tool(
+        name="close_i2c",
+        description="Close an I2C session and reset the BusPirate to HiZ mode. [allowed-write]",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    # --- 1-Wire tools ---
+    Tool(
+        name="open_1wire",
+        description=(
+            "Open a 1-Wire connection and start an engagement. "
+            "Configures 1-Wire mode with pullup enabled. [allowed-write]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "engagement_name": {"type": "string", "description": "Target device name"},
+                "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
+                "current_ma": {"type": "integer", "description": "Current limit in mA"},
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/1wire/ instead of creating a standalone engagement.",
+                },
+            },
+            "required": ["engagement_name"],
+        },
+    ),
+    Tool(
+        name="onewire_search",
+        description=(
+            "Search for a device on the 1-Wire bus using Read ROM (0x33). "
+            "Returns family code, serial number, and CRC validity. "
+            "Works when exactly one device is present. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="onewire_read",
+        description=(
+            "Send arbitrary bytes on the 1-Wire bus and read back a response. [read-only]"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "write_hex": {"type": "string", "description": "Hex string of bytes to send (e.g. 'CC44')"},
+                "read_bytes": {"type": "integer", "description": "Number of bytes to read back"},
+            },
+            "required": ["session_id", "write_hex", "read_bytes"],
+        },
+    ),
+    Tool(
+        name="close_1wire",
+        description="Close a 1-Wire session and reset the BusPirate to HiZ mode. [allowed-write]",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
+    ),
 ]
 
 
@@ -370,6 +656,155 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     reset_pin=arguments.get("reset_pin", -1),
                     baud=arguments.get("baud", 115200),
                 )
+
+        # --- SPI ---
+        elif name == "open_spi":
+            hw = _get_hardware()
+            result = await tools.tool_open_spi(
+                session_manager=session_manager,
+                hardware=hw,
+                engagement_name=arguments["engagement_name"],
+                speed=arguments.get("speed", 1_000_000),
+                clock_polarity=arguments.get("clock_polarity", False),
+                clock_phase=arguments.get("clock_phase", False),
+                chip_select_idle=arguments.get("chip_select_idle", True),
+                voltage_mv=arguments.get("voltage_mv"),
+                current_ma=arguments.get("current_ma"),
+                project_path=arguments.get("project_path"),
+            )
+
+        elif name == "spi_probe":
+            result = await tools.tool_spi_probe(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+            )
+
+        elif name == "spi_read":
+            result = await tools.tool_spi_read(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                address=arguments["address"],
+                length=arguments["length"],
+            )
+
+        elif name == "spi_dump":
+            result = await tools.tool_spi_dump(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                size=arguments.get("size"),
+                output_filename=arguments.get("output_filename", "flash_dump.bin"),
+                chunk_size=arguments.get("chunk_size", 512),
+            )
+
+        elif name == "spi_write":
+            result = await tools.tool_spi_write(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                input_path=arguments["input_path"],
+                erase=arguments.get("erase", True),
+                verify=arguments.get("verify", True),
+            )
+
+        elif name == "spi_transfer":
+            result = await tools.tool_spi_transfer(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                write_hex=arguments["write_hex"],
+                read_bytes=arguments.get("read_bytes", 0),
+            )
+
+        elif name == "close_spi":
+            result = await tools.tool_close_spi(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                hardware=_get_hardware(),
+            )
+
+        # --- I2C ---
+        elif name == "open_i2c":
+            hw = _get_hardware()
+            result = await tools.tool_open_i2c(
+                session_manager=session_manager,
+                hardware=hw,
+                engagement_name=arguments["engagement_name"],
+                speed=arguments.get("speed", 400_000),
+                clock_stretch=arguments.get("clock_stretch", False),
+                voltage_mv=arguments.get("voltage_mv"),
+                current_ma=arguments.get("current_ma"),
+                project_path=arguments.get("project_path"),
+            )
+
+        elif name == "i2c_scan":
+            result = await tools.tool_i2c_scan(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+            )
+
+        elif name == "i2c_read":
+            result = await tools.tool_i2c_read(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                device_addr=arguments["device_addr"],
+                register_addr=arguments.get("register_addr"),
+                length=arguments.get("length", 1),
+            )
+
+        elif name == "i2c_write":
+            result = await tools.tool_i2c_write(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                device_addr=arguments["device_addr"],
+                register_addr=arguments["register_addr"],
+                data_hex=arguments["data_hex"],
+            )
+
+        elif name == "i2c_dump":
+            result = await tools.tool_i2c_dump(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                device_addr=arguments["device_addr"],
+                size=arguments.get("size", 256),
+            )
+
+        elif name == "close_i2c":
+            result = await tools.tool_close_i2c(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                hardware=_get_hardware(),
+            )
+
+        # --- 1-Wire ---
+        elif name == "open_1wire":
+            hw = _get_hardware()
+            result = await tools.tool_open_1wire(
+                session_manager=session_manager,
+                hardware=hw,
+                engagement_name=arguments["engagement_name"],
+                voltage_mv=arguments.get("voltage_mv"),
+                current_ma=arguments.get("current_ma"),
+                project_path=arguments.get("project_path"),
+            )
+
+        elif name == "onewire_search":
+            result = await tools.tool_onewire_search(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+            )
+
+        elif name == "onewire_read":
+            result = await tools.tool_onewire_read(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                write_hex=arguments["write_hex"],
+                read_bytes=arguments["read_bytes"],
+            )
+
+        elif name == "close_1wire":
+            result = await tools.tool_close_1wire(
+                session_manager=session_manager,
+                session_id=arguments["session_id"],
+                hardware=_get_hardware(),
+            )
 
         else:
             result = {"error": f"Unknown tool: {name}"}

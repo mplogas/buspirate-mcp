@@ -29,6 +29,26 @@ _TOOL_TIERS: dict[str, SafetyTier] = {
     "set_power": SafetyTier.APPROVAL_WRITE,
     "enter_download_mode": SafetyTier.ALLOWED_WRITE,
     "read_flash": SafetyTier.ALLOWED_WRITE,
+    # SPI
+    "open_spi": SafetyTier.ALLOWED_WRITE,
+    "spi_probe": SafetyTier.READ_ONLY,
+    "spi_read": SafetyTier.READ_ONLY,
+    "spi_dump": SafetyTier.READ_ONLY,
+    "spi_write": SafetyTier.APPROVAL_WRITE,
+    "spi_transfer": SafetyTier.READ_ONLY,
+    "close_spi": SafetyTier.ALLOWED_WRITE,
+    # I2C
+    "open_i2c": SafetyTier.ALLOWED_WRITE,
+    "i2c_scan": SafetyTier.READ_ONLY,
+    "i2c_read": SafetyTier.READ_ONLY,
+    "i2c_write": SafetyTier.APPROVAL_WRITE,
+    "i2c_dump": SafetyTier.READ_ONLY,
+    "close_i2c": SafetyTier.ALLOWED_WRITE,
+    # 1-Wire
+    "open_1wire": SafetyTier.ALLOWED_WRITE,
+    "onewire_search": SafetyTier.READ_ONLY,
+    "onewire_read": SafetyTier.READ_ONLY,
+    "close_1wire": SafetyTier.ALLOWED_WRITE,
 }
 
 

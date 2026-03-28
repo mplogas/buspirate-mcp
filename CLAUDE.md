@@ -26,11 +26,11 @@ Only `hardware.py` imports from the BPIO2 SDK. Everything else talks to `hardwar
 
 Three tiers enforced at the MCP server boundary:
 
-- **read-only**: full autonomy (list_devices, verify_connection, scan_baud, read_output)
-- **allowed-write**: autonomous but logged (open_uart, send_command, close_uart, enter_download_mode, read_flash)
-- **approval-write**: blocks until human confirms via _confirmed token (set_voltage, set_power)
+- **read-only**: full autonomy (list_devices, verify_connection, scan_baud, read_output, spi_probe, spi_read, spi_dump, spi_transfer, i2c_scan, i2c_read, i2c_dump, onewire_search, onewire_read)
+- **allowed-write**: autonomous but logged (open_uart, send_command, close_uart, enter_download_mode, read_flash, open_spi, close_spi, open_i2c, close_i2c, open_1wire, close_1wire)
+- **approval-write**: blocks until human confirms via _confirmed token (set_voltage, set_power, spi_write, i2c_write)
 
-Wrong voltage fries chips. Do not bypass or weaken the approval-write gate.
+Wrong voltage fries chips. Writing SPI flash or I2C devices overwrites data irreversibly. Do not bypass or weaken the approval-write gate.
 
 ## BusPirate 6 Hardware Notes
 
@@ -38,11 +38,32 @@ Wrong voltage fries chips. Do not bypass or weaken the approval-write gate.
 
 The BP6 must have BPIO2 binary mode enabled before the SDK can talk to it. Enable via the terminal port (ACM0): `binmode` -> select `2` (BPIO2 flatbuffer interface) -> `y` to save. This persists across reboots.
 
-### Pin mapping
+### Pin mapping (UART)
 
 BP6 UART mode uses IO4 (TX->) and IO5 (RX<-). The BP display is the authoritative source for pin assignment.
 
 **Beware:** `status_request()` returns a `mode_pin_labels` array that includes VOUT at index 0, shifting all labels by one. Index 5 in the labels array = physical IO4, index 6 = IO5. Trust the display, not the raw array indices.
+
+### SPI Mode
+
+- Pin mapping: IO2=CLK, IO3=MISO, IO4=MOSI, IO5=CS
+- Default speed: 1 MHz, configurable up to 12 MHz for flash dumps
+- SPI flash commands: JEDEC ID (0x9F), Read (0x03), Write Enable (0x06), Page Program (0x02), Chip Erase (0xC7)
+- Flash dumps use 512-byte chunks to avoid buffer overruns
+
+### I2C Mode
+
+- Pin mapping: IO4=SDA, IO5=SCL
+- Default speed: 400 kHz (fast mode), configurable
+- Pullups enabled by default (required for I2C)
+- SDK scan() has print() calls -- hardware.py redirects stdout to prevent MCP stdio corruption
+
+### 1-Wire Mode
+
+- Pin mapping: IO4=DQ (data line)
+- Pullup enabled by default (required for 1-Wire)
+- Read ROM (0x33) supports single-device identification. Multi-device search not implemented in SDK.
+- CRC-8 validation (Dallas polynomial 0x8C) on ROM codes
 
 ### Power supply
 
