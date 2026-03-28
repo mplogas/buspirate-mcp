@@ -459,9 +459,6 @@ async def tool_read_flash(
     if reset_pin >= 0 and (not isinstance(reset_pin, int) or reset_pin > 7):
         return {"error": f"reset_pin must be 0-7, got: {reset_pin}"}
 
-    # Sanitize output_path: strip directory components to prevent path traversal
-    output_path = Path(output_path).name
-
     # Step 1: Enter download mode if pins provided
     if boot_pin >= 0 and reset_pin >= 0:
         dl_result = await tool_enter_download_mode(
