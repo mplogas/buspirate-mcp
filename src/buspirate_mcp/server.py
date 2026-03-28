@@ -917,18 +917,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         # --- Logic Analyzer (FALA) ---
         elif name == "la_prepare":
-            # Disconnect BPIO2 before switching to FALA binmode
-            hw = None
-            if _hardware is not None:
-                _hardware.disconnect()
-            _hardware = None
+            # Pass hardware so tool can check active mode and find ports.
+            # FALA activation switches binmode, releasing ACM1 from BPIO2.
+            hw = _get_hardware()
             result = await tools.tool_la_prepare(
                 session_manager=session_manager,
+                hardware=hw,
                 engagement_name=arguments["engagement_name"],
                 protocol=arguments["protocol"],
                 protocol_config=arguments.get("protocol_config"),
                 project_path=arguments.get("project_path"),
             )
+            # Null hardware so next BPIO2 call re-detects after FALA cleanup
+            _hardware = None
 
         elif name == "la_command":
             result = await tools.tool_la_command(

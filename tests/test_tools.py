@@ -640,9 +640,9 @@ class TestOpenSPI:
         assert "engagement_path" in result
         mock_hw.configure_spi.assert_called_once_with(
             speed=1_000_000,
-            cpol=False,
-            cpha=False,
-            cs_idle=True,
+            clock_polarity=False,
+            clock_phase=False,
+            chip_select_idle=True,
             voltage_mv=None,
             current_ma=None,
         )

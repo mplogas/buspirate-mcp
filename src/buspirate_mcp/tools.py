@@ -364,47 +364,50 @@ def _enter_bridge_mode(terminal_port: str) -> bool:
     """
     import serial
     ser = serial.Serial(terminal_port, 115200, timeout=2)
-    time.sleep(0.5)
-    ser.read(ser.in_waiting or 1)
+    try:
+        time.sleep(0.5)
+        ser.read(ser.in_waiting or 1)
 
-    # Send enter to see what prompt we get
-    ser.write(b'\r')
-    time.sleep(0.5)
-    resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
-
-    # Handle VT100 prompt (appears after fresh USB plug)
-    if 'VT100' in resp or resp.strip() == '':
-        ser.write(b'n\r')
+        # Send enter to see what prompt we get
+        ser.write(b'\r')
         time.sleep(0.5)
         resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
 
-    # Check if we're already in UART mode
-    if 'UART>' in resp or 'UART>' in resp.upper():
-        # Already in UART mode, send bridge
+        # Handle VT100 prompt (appears after fresh USB plug)
+        if 'VT100' in resp or resp.strip() == '':
+            ser.write(b'n\r')
+            time.sleep(0.5)
+            resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
+
+        # Check if we're already in UART mode
+        if 'UART>' in resp or 'UART>' in resp.upper():
+            # Already in UART mode, send bridge
+            ser.write(b'bridge\r')
+            time.sleep(1)
+            resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
+            return 'bridge' in resp.lower()
+
+        if 'HiZ>' in resp:
+            # Need to enter UART mode first
+            ser.write(b'm\r')
+            time.sleep(0.5)
+            ser.read(ser.in_waiting or 1)
+            ser.write(b'3\r')
+            time.sleep(1)
+            ser.read(ser.in_waiting or 1)
+            ser.write(b'y\r')
+            time.sleep(0.5)
+            ser.read(ser.in_waiting or 1)
+
+        # Try bridge
         ser.write(b'bridge\r')
         time.sleep(1)
         resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
-        ser.close()
         return 'bridge' in resp.lower()
-
-    if 'HiZ>' in resp:
-        # Need to enter UART mode first
-        ser.write(b'm\r')
-        time.sleep(0.5)
-        ser.read(ser.in_waiting or 1)
-        ser.write(b'3\r')
-        time.sleep(1)
-        ser.read(ser.in_waiting or 1)
-        ser.write(b'y\r')
-        time.sleep(0.5)
-        ser.read(ser.in_waiting or 1)
-
-    # Try bridge
-    ser.write(b'bridge\r')
-    time.sleep(1)
-    resp = ser.read(ser.in_waiting or 1).decode('utf-8', errors='replace')
-    ser.close()
-    return 'bridge' in resp.lower()
+    except Exception:
+        return False
+    finally:
+        ser.close()
 
 
 def _exit_bridge_mode(terminal_port: str) -> None:
@@ -912,9 +915,9 @@ async def tool_open_spi(
     """Configure SPI mode on the BusPirate and create an engagement session."""
     hardware.configure_spi(
         speed=speed,
-        cpol=clock_polarity,
-        cpha=clock_phase,
-        cs_idle=chip_select_idle,
+        clock_polarity=clock_polarity,
+        clock_phase=clock_phase,
+        chip_select_idle=chip_select_idle,
         voltage_mv=voltage_mv,
         current_ma=current_ma,
     )
