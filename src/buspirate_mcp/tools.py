@@ -20,6 +20,48 @@ from buspirate_mcp.safety import validate_voltage_range
 from buspirate_mcp.session import SessionManager
 
 COMMON_BAUD_RATES = [115200, 57600, 38400, 19200, 9600, 4800, 2400, 1200]
+
+ONEWIRE_FAMILIES = {
+    0x01: "DS1990A (iButton)",
+    0x10: "DS18S20 (Temperature)",
+    0x22: "DS1822 (Temperature)",
+    0x28: "DS18B20 (Temperature)",
+    0x26: "DS2438 (Battery Monitor)",
+    0x29: "DS2408 (8-ch Switch)",
+    0x3A: "DS2413 (2-ch Switch)",
+}
+ONEWIRE_CMD_READ_ROM = 0x33
+
+I2C_KNOWN_DEVICES = {
+    range(0x50, 0x58): "EEPROM (24Cxx series)",
+    range(0x68, 0x6A): "RTC/IMU (DS3231, MPU6050)",
+    range(0x76, 0x78): "Pressure/Temp (BME280, BMP280)",
+    range(0x3C, 0x3E): "OLED Display (SSD1306)",
+    range(0x48, 0x50): "ADC (ADS1115, PCF8591)",
+    range(0x20, 0x28): "IO Expander (PCF8574, MCP23017)",
+    range(0x38, 0x40): "Touch/Humidity (FT6236, HTU21D)",
+}
+
+# SPI flash commands (JEDEC standard)
+SPI_CMD_JEDEC_ID = 0x9F
+SPI_CMD_READ_STATUS = 0x05
+SPI_CMD_WRITE_ENABLE = 0x06
+SPI_CMD_READ_DATA = 0x03
+SPI_CMD_PAGE_PROGRAM = 0x02
+SPI_CMD_CHIP_ERASE = 0xC7
+SPI_STATUS_WIP = 0x01
+
+SPI_MANUFACTURERS = {
+    0xEF: "Winbond",
+    0xC2: "Macronix",
+    0x20: "Micron/Numonyx",
+    0xC8: "GigaDevice",
+    0x9D: "ISSI",
+    0x01: "Spansion/Cypress",
+    0xBF: "SST/Microchip",
+    0x1F: "Atmel/Microchip",
+    0x85: "Puya",
+}
 PROMPT_PATTERN = re.compile(r"^\s*[#$>\]]", re.MULTILINE)
 BAUD_SCAN_READ_TIME_S = 0.5
 SILENCE_THRESHOLD_S = 0.5
@@ -476,3 +518,702 @@ async def tool_read_flash(
             "USB-replug to exit bridge mode and restore normal operation."
         ),
     }
+
+
+def _onewire_crc8(data: bytes) -> int:
+    """CRC-8 Dallas/Maxim 1-Wire (polynomial 0x31, reflected as 0x8C)."""
+    crc = 0
+    for byte in data:
+        for _ in range(8):
+            mix = (crc ^ byte) & 0x01
+            crc >>= 1
+            if mix:
+                crc ^= 0x8C
+            byte >>= 1
+    return crc
+
+
+async def tool_open_1wire(
+    session_manager: SessionManager,
+    hardware: Any,
+    engagement_name: str,
+    voltage_mv: int | None = None,
+    current_ma: int | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """Configure 1-Wire mode and open a transaction session."""
+    hardware.configure_1wire(voltage_mv, current_ma)
+    session = session_manager.create(
+        name=engagement_name,
+        hardware=hardware,
+        protocol="1wire",
+        protocol_config={
+            "voltage_mv": voltage_mv,
+            "current_ma": current_ma,
+        },
+        project_path=project_path,
+    )
+    return {
+        "session_id": session.session_id,
+        "engagement_path": str(session.engagement_path),
+    }
+
+
+async def tool_onewire_search(
+    session_manager: SessionManager,
+    session_id: str,
+) -> dict[str, Any]:
+    """Search for a device on the 1-Wire bus using Read ROM (0x33).
+
+    Works when exactly one device is present. Returns family code, serial,
+    CRC validity, and full ROM code. Returns {"present": False} if no device
+    asserts a presence pulse.
+    """
+    session = session_manager.get(session_id)
+
+    present = session.hardware.onewire_reset()
+    if not present:
+        return {"present": False}
+
+    rom_bytes = session.hardware.onewire_transfer([ONEWIRE_CMD_READ_ROM], 8)
+    if not rom_bytes or len(rom_bytes) < 8:
+        return {"present": False}
+
+    rom = bytes(rom_bytes)
+    family_code = rom[0]
+    serial_bytes = rom[1:7]
+    crc_byte = rom[7]
+
+    # CRC covers the first 7 bytes; the 8th byte is the CRC itself.
+    crc_calc = _onewire_crc8(rom[:7])
+    crc_valid = crc_calc == crc_byte
+
+    family_name = ONEWIRE_FAMILIES.get(family_code, f"Unknown (0x{family_code:02X})")
+    serial_hex = serial_bytes.hex().upper()
+    rom_code = rom.hex().upper()
+
+    session.log_transaction(
+        operation="READ_ROM",
+        write_hex=f"{ONEWIRE_CMD_READ_ROM:02X}",
+        read_hex=rom.hex().upper(),
+        metadata={
+            "family_code": f"0x{family_code:02X}",
+            "family_name": family_name,
+            "serial": serial_hex,
+            "crc_valid": crc_valid,
+        },
+    )
+
+    return {
+        "present": True,
+        "family_code": f"0x{family_code:02X}",
+        "family_name": family_name,
+        "serial": serial_hex,
+        "crc_valid": crc_valid,
+        "rom_code": rom_code,
+    }
+
+
+async def tool_onewire_read(
+    session_manager: SessionManager,
+    session_id: str,
+    write_hex: str,
+    read_bytes: int,
+) -> dict[str, Any]:
+    """Send arbitrary bytes on the 1-Wire bus and read back a response.
+
+    write_hex: hex string of bytes to write (e.g. "CC44").
+    read_bytes: number of bytes to read after the write.
+    """
+    session = session_manager.get(session_id)
+
+    data = bytes.fromhex(write_hex)
+    result = session.hardware.onewire_transfer(list(data), read_bytes)
+    result_bytes = bytes(result) if result else b""
+    result_hex = result_bytes.hex().upper()
+
+    session.log_transaction(
+        operation="TRANSFER",
+        write_hex=write_hex.upper(),
+        read_hex=result_hex,
+    )
+
+    return {
+        "tx": write_hex.upper(),
+        "rx": result_hex,
+        "bytes_read": len(result_bytes),
+    }
+
+
+async def tool_close_1wire(
+    session_manager: SessionManager,
+    session_id: str,
+    hardware: Any,
+) -> dict[str, Any]:
+    """Close a 1-Wire session and reset the BusPirate to HiZ mode."""
+    session_manager.close(session_id)
+    hardware.reset_mode()
+    return {"closed": True}
+
+
+# ---------------------------------------------------------------------------
+# I2C tools
+# ---------------------------------------------------------------------------
+
+def _i2c_hint(addr_7bit: int) -> str | None:
+    """Look up a hint for a 7-bit I2C address from I2C_KNOWN_DEVICES."""
+    for addr_range, hint in I2C_KNOWN_DEVICES.items():
+        if addr_7bit in addr_range:
+            return hint
+    return None
+
+
+def _parse_device_addr(device_addr: str | int) -> int:
+    """Parse device_addr as hex string or int, return 7-bit int."""
+    if isinstance(device_addr, str):
+        return int(device_addr, 16)
+    return device_addr
+
+
+async def tool_open_i2c(
+    session_manager: SessionManager,
+    hardware: Any,
+    engagement_name: str,
+    speed: int = 400000,
+    clock_stretch: bool = False,
+    voltage_mv: int | None = None,
+    current_ma: int | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """Open a persistent I2C session and start logging."""
+    hardware.configure_i2c(speed, clock_stretch, voltage_mv, current_ma)
+    session = session_manager.create(
+        name=engagement_name,
+        hardware=hardware,
+        protocol="i2c",
+        protocol_config={
+            "speed": speed,
+            "clock_stretch": clock_stretch,
+            "voltage_mv": voltage_mv,
+            "current_ma": current_ma,
+        },
+        project_path=project_path,
+    )
+    return {
+        "session_id": session.session_id,
+        "engagement_path": str(session.engagement_path),
+        "i2c_config": {
+            "speed": speed,
+            "clock_stretch": clock_stretch,
+            "voltage_mv": voltage_mv,
+            "current_ma": current_ma,
+        },
+    }
+
+
+async def tool_i2c_scan(
+    session_manager: SessionManager,
+    session_id: str,
+) -> dict[str, Any]:
+    """Scan the I2C bus for devices and return addresses with hints."""
+    session = session_manager.get(session_id)
+    raw_addresses = session.hardware.i2c_scan(0x00, 0x7F)
+
+    # SDK returns raw (shifted) addresses -- convert to 7-bit and deduplicate
+    seen: set[int] = set()
+    devices = []
+    for raw_addr in raw_addresses:
+        addr_7bit = raw_addr >> 1
+        if addr_7bit in seen:
+            continue
+        seen.add(addr_7bit)
+        hint = _i2c_hint(addr_7bit)
+        devices.append({
+            "address": f"0x{addr_7bit:02X}",
+            "address_7bit": addr_7bit,
+            "hint": hint,
+        })
+
+    devices.sort(key=lambda d: d["address_7bit"])
+
+    session.log_transaction(
+        operation="scan",
+        metadata={"found": len(devices), "addresses": [d["address"] for d in devices]},
+    )
+
+    return {"devices": devices, "count": len(devices)}
+
+
+async def tool_i2c_read(
+    session_manager: SessionManager,
+    session_id: str,
+    device_addr: str | int,
+    register_addr: int | None = None,
+    length: int = 1,
+) -> dict[str, Any]:
+    """Read bytes from an I2C device, optionally from a specific register."""
+    session = session_manager.get(session_id)
+    addr_7bit = _parse_device_addr(device_addr)
+    addr_write = (addr_7bit << 1) & 0xFE
+
+    if register_addr is not None:
+        write_data = [addr_write, register_addr]
+    else:
+        write_data = [addr_write]
+
+    read_bytes_raw = session.hardware.i2c_transfer(write_data, read_bytes=length)
+
+    data_hex = read_bytes_raw.hex() if read_bytes_raw else ""
+    data_list = list(read_bytes_raw) if read_bytes_raw else []
+
+    write_hex = bytes(write_data).hex()
+    session.log_transaction(
+        operation="read",
+        write_hex=write_hex,
+        read_hex=data_hex,
+        metadata={
+            "address": f"0x{addr_7bit:02X}",
+            "register": f"0x{register_addr:02X}" if register_addr is not None else None,
+            "length": length,
+        },
+    )
+
+    return {
+        "address": f"0x{addr_7bit:02X}",
+        "register": f"0x{register_addr:02X}" if register_addr is not None else None,
+        "data_hex": data_hex,
+        "data_bytes": data_list,
+        "length": len(data_list),
+    }
+
+
+async def tool_i2c_write(
+    session_manager: SessionManager,
+    session_id: str,
+    device_addr: str | int,
+    register_addr: int,
+    data_hex: str,
+) -> dict[str, Any]:
+    """Write bytes to an I2C device register."""
+    session = session_manager.get(session_id)
+    addr_7bit = _parse_device_addr(device_addr)
+    addr_write = (addr_7bit << 1) & 0xFE
+
+    data_bytes = list(bytes.fromhex(data_hex))
+    write_data = [addr_write, register_addr] + data_bytes
+
+    session.hardware.i2c_transfer(write_data, read_bytes=0)
+
+    write_hex = bytes(write_data).hex()
+    session.log_transaction(
+        operation="write",
+        write_hex=write_hex,
+        metadata={
+            "address": f"0x{addr_7bit:02X}",
+            "register": f"0x{register_addr:02X}",
+            "bytes_written": len(data_bytes),
+        },
+    )
+
+    return {
+        "written": True,
+        "address": f"0x{addr_7bit:02X}",
+        "register": f"0x{register_addr:02X}",
+        "bytes_written": len(data_bytes),
+    }
+
+
+async def tool_i2c_dump(
+    session_manager: SessionManager,
+    session_id: str,
+    device_addr: str | int,
+    size: int = 256,
+) -> dict[str, Any]:
+    """Dump memory from an I2C device by reading all registers sequentially."""
+    session = session_manager.get(session_id)
+    addr_7bit = _parse_device_addr(device_addr)
+    addr_write = (addr_7bit << 1) & 0xFE
+
+    chunk_size = 32
+    all_data = bytearray()
+
+    for offset in range(0, size, chunk_size):
+        count = min(chunk_size, size - offset)
+        write_data = [addr_write, offset]
+        chunk = session.hardware.i2c_transfer(write_data, read_bytes=count)
+        if chunk:
+            all_data.extend(chunk)
+        else:
+            all_data.extend(b"\xff" * count)
+
+    artifacts_dir = session.engagement_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    dump_file = artifacts_dir / f"i2c_dump_{addr_7bit:02x}.bin"
+    dump_file.write_bytes(bytes(all_data))
+
+    hex_preview = all_data[:64].hex()
+
+    session.log_transaction(
+        operation="dump",
+        metadata={
+            "address": f"0x{addr_7bit:02X}",
+            "size": size,
+            "bytes_read": len(all_data),
+            "file": str(dump_file),
+        },
+    )
+
+    return {
+        "bytes_read": len(all_data),
+        "hex_preview": hex_preview,
+        "file_path": str(dump_file),
+    }
+
+
+async def tool_close_i2c(
+    session_manager: SessionManager,
+    session_id: str,
+    hardware: Any,
+) -> dict[str, Any]:
+    """Close an I2C session and reset the bus mode."""
+    session_manager.close(session_id)
+    hardware.reset_mode()
+    return {"closed": True}
+
+
+# ---------------------------------------------------------------------------
+# SPI tools
+# ---------------------------------------------------------------------------
+
+
+def _human_size(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.0f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n} B"
+
+
+async def tool_open_spi(
+    session_manager: SessionManager,
+    hardware: Any,
+    engagement_name: str,
+    speed: int = 1_000_000,
+    clock_polarity: bool = False,
+    clock_phase: bool = False,
+    chip_select_idle: bool = True,
+    voltage_mv: int | None = None,
+    current_ma: int | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """Configure SPI mode on the BusPirate and create an engagement session."""
+    hardware.configure_spi(
+        speed=speed,
+        cpol=clock_polarity,
+        cpha=clock_phase,
+        cs_idle=chip_select_idle,
+        voltage_mv=voltage_mv,
+        current_ma=current_ma,
+    )
+    session = session_manager.create(
+        name=engagement_name,
+        hardware=hardware,
+        protocol="spi",
+        protocol_config={
+            "speed": speed,
+            "cpol": clock_polarity,
+            "cpha": clock_phase,
+        },
+        project_path=project_path,
+    )
+    return {
+        "session_id": session.session_id,
+        "engagement_path": str(session.engagement_path),
+        "spi_config": {
+            "speed": speed,
+            "cpol": clock_polarity,
+            "cpha": clock_phase,
+            "cs_idle": chip_select_idle,
+        },
+    }
+
+
+async def tool_spi_probe(
+    session_manager: SessionManager,
+    session_id: str,
+) -> dict[str, Any]:
+    """Read JEDEC ID and status register from the SPI flash chip."""
+    session = session_manager.get(session_id)
+    hw = session.hardware
+
+    # JEDEC ID: send 0x9F, read 3 bytes (manufacturer, type, capacity)
+    jedec = hw.spi_transfer([SPI_CMD_JEDEC_ID], 3)
+    jedec_bytes = bytes(jedec)
+    session.log_transaction(
+        "jedec_id",
+        write_hex=f"{SPI_CMD_JEDEC_ID:02x}",
+        read_hex=jedec_bytes.hex(),
+    )
+
+    # Status register: send 0x05, read 1 byte
+    status = hw.spi_transfer([SPI_CMD_READ_STATUS], 1)
+    status_byte = bytes(status)[0]
+    session.log_transaction(
+        "read_status",
+        write_hex=f"{SPI_CMD_READ_STATUS:02x}",
+        read_hex=f"{status_byte:02x}",
+    )
+
+    manufacturer = SPI_MANUFACTURERS.get(
+        jedec_bytes[0], f"Unknown (0x{jedec_bytes[0]:02X})"
+    )
+    capacity_bytes = 2 ** jedec_bytes[2] if jedec_bytes[2] > 0 else 0
+
+    return {
+        "jedec_id": jedec_bytes.hex().upper(),
+        "manufacturer": manufacturer,
+        "device_type": f"0x{jedec_bytes[1]:02X}",
+        "capacity_bytes": capacity_bytes,
+        "capacity_human": _human_size(capacity_bytes),
+        "status_register": f"0x{status_byte:02X}",
+        "write_protected": bool(status_byte & 0x0C),
+    }
+
+
+async def tool_spi_read(
+    session_manager: SessionManager,
+    session_id: str,
+    address: int,
+    length: int,
+) -> dict[str, Any]:
+    """Read a region of SPI flash memory."""
+    session = session_manager.get(session_id)
+    hw = session.hardware
+    chunk_size = 512
+    collected = bytearray()
+
+    remaining = length
+    addr = address
+    while remaining > 0:
+        n = min(chunk_size, remaining)
+        cmd = [
+            SPI_CMD_READ_DATA,
+            (addr >> 16) & 0xFF,
+            (addr >> 8) & 0xFF,
+            addr & 0xFF,
+        ]
+        data = hw.spi_transfer(cmd, n)
+        collected.extend(data)
+        addr += n
+        remaining -= n
+
+    # Save to artifacts
+    artifacts_dir = session.engagement_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    out_path = artifacts_dir / f"spi_read_{address:06x}_{length}.bin"
+    out_path.write_bytes(bytes(collected))
+
+    session.log_transaction(
+        "read_data",
+        write_hex=f"03 {address:06x}",
+        read_hex=f"{len(collected)} bytes",
+        metadata={"address": address, "length": length},
+    )
+
+    hex_preview = bytes(collected[:64]).hex()
+    return {
+        "bytes_read": len(collected),
+        "hex_preview": hex_preview,
+        "file_path": str(out_path),
+    }
+
+
+async def tool_spi_dump(
+    session_manager: SessionManager,
+    session_id: str,
+    size: int | None = None,
+    output_filename: str = "flash_dump.bin",
+    chunk_size: int = 512,
+) -> dict[str, Any]:
+    """Dump the entire SPI flash to a file."""
+    session = session_manager.get(session_id)
+    hw = session.hardware
+
+    # Auto-detect size via JEDEC ID if not provided
+    if size is None:
+        jedec = hw.spi_transfer([SPI_CMD_JEDEC_ID], 3)
+        jedec_bytes = bytes(jedec)
+        size = 2 ** jedec_bytes[2] if jedec_bytes[2] > 0 else 0
+        if size == 0:
+            return {
+                "error": "Could not auto-detect flash size. "
+                "Provide size explicitly.",
+            }
+
+    artifacts_dir = session.engagement_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    out_path = artifacts_dir / output_filename
+
+    collected = bytearray()
+    addr = 0
+    t0 = time.monotonic()
+
+    while addr < size:
+        n = min(chunk_size, size - addr)
+        cmd = [
+            SPI_CMD_READ_DATA,
+            (addr >> 16) & 0xFF,
+            (addr >> 8) & 0xFF,
+            addr & 0xFF,
+        ]
+        data = hw.spi_transfer(cmd, n)
+        collected.extend(data)
+        addr += n
+
+    elapsed = time.monotonic() - t0
+    out_path.write_bytes(bytes(collected))
+
+    speed_kbps = (len(collected) / 1024) / elapsed if elapsed > 0 else 0.0
+
+    session.log_transaction(
+        "dump",
+        write_hex="full flash",
+        read_hex=f"{len(collected)} bytes",
+        metadata={
+            "size": size,
+            "elapsed_s": round(elapsed, 3),
+            "speed_kbps": round(speed_kbps, 1),
+        },
+    )
+
+    return {
+        "bytes_read": len(collected),
+        "elapsed_s": round(elapsed, 3),
+        "speed_kbps": round(speed_kbps, 1),
+        "file_path": str(out_path),
+    }
+
+
+async def tool_spi_write(
+    session_manager: SessionManager,
+    session_id: str,
+    input_path: str,
+    erase: bool = True,
+    verify: bool = True,
+) -> dict[str, Any]:
+    """Write a binary file to SPI flash. Optionally erases first and verifies."""
+    session = session_manager.get(session_id)
+    hw = session.hardware
+
+    data = Path(input_path).read_bytes()
+    t0 = time.monotonic()
+
+    # Chip erase
+    if erase:
+        hw.spi_transfer([SPI_CMD_WRITE_ENABLE], 0)
+        hw.spi_transfer([SPI_CMD_CHIP_ERASE], 0)
+        # Poll WIP bit until erase completes
+        while True:
+            status = hw.spi_transfer([SPI_CMD_READ_STATUS], 1)
+            if not (bytes(status)[0] & SPI_STATUS_WIP):
+                break
+            await asyncio.sleep(0.1)
+        session.log_transaction("chip_erase", write_hex="06 c7", read_hex="done")
+
+    # Page program (256-byte pages)
+    page_size = 256
+    addr = 0
+    while addr < len(data):
+        page = data[addr : addr + page_size]
+        hw.spi_transfer([SPI_CMD_WRITE_ENABLE], 0)
+        cmd = [
+            SPI_CMD_PAGE_PROGRAM,
+            (addr >> 16) & 0xFF,
+            (addr >> 8) & 0xFF,
+            addr & 0xFF,
+        ] + list(page)
+        hw.spi_transfer(cmd, 0)
+        # Poll WIP
+        while True:
+            status = hw.spi_transfer([SPI_CMD_READ_STATUS], 1)
+            if not (bytes(status)[0] & SPI_STATUS_WIP):
+                break
+            await asyncio.sleep(0.01)
+        addr += page_size
+
+    session.log_transaction(
+        "page_program",
+        write_hex=f"{len(data)} bytes",
+        read_hex="",
+        metadata={"pages": (len(data) + page_size - 1) // page_size},
+    )
+
+    # Verify
+    verified = False
+    if verify:
+        read_back = bytearray()
+        addr = 0
+        while addr < len(data):
+            n = min(512, len(data) - addr)
+            cmd = [
+                SPI_CMD_READ_DATA,
+                (addr >> 16) & 0xFF,
+                (addr >> 8) & 0xFF,
+                addr & 0xFF,
+            ]
+            chunk = hw.spi_transfer(cmd, n)
+            read_back.extend(chunk)
+            addr += n
+        verified = bytes(read_back[: len(data)]) == data
+        session.log_transaction(
+            "verify",
+            write_hex="read-back compare",
+            read_hex="match" if verified else "MISMATCH",
+        )
+
+    elapsed = time.monotonic() - t0
+    return {
+        "bytes_written": len(data),
+        "erased": erase,
+        "verified": verified if verify else None,
+        "elapsed_s": round(elapsed, 3),
+    }
+
+
+async def tool_spi_transfer(
+    session_manager: SessionManager,
+    session_id: str,
+    write_hex: str,
+    read_bytes: int = 0,
+) -> dict[str, Any]:
+    """Send a raw SPI transaction."""
+    session = session_manager.get(session_id)
+    hw = session.hardware
+
+    tx_data = list(bytes.fromhex(write_hex))
+    rx_data = hw.spi_transfer(tx_data, read_bytes)
+    rx_hex = bytes(rx_data).hex() if rx_data else ""
+
+    session.log_transaction(
+        "raw_transfer",
+        write_hex=write_hex,
+        read_hex=rx_hex,
+    )
+
+    return {
+        "tx": write_hex,
+        "rx": rx_hex,
+        "bytes_read": len(rx_data) if rx_data else 0,
+    }
+
+
+async def tool_close_spi(
+    session_manager: SessionManager,
+    session_id: str,
+    hardware: Any,
+) -> dict[str, Any]:
+    """Close an SPI session and reset the BusPirate mode."""
+    session_manager.close(session_id)
+    hardware.reset_mode()
+    return {"closed": True, "session_id": session_id}
