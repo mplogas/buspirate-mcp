@@ -1,16 +1,19 @@
 # buspirate-mcp
 
-MCP server for BusPirate 6 hardware security testing. Exposes UART, power supply, GPIO, and flash-dump operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools over stdio transport.
+MCP server for BusPirate 6 hardware security testing. Exposes UART, SPI, I2C, 1-Wire, power supply, and GPIO operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools over stdio transport. 28 tools across 4 bus protocols.
 
 Built for use with Claude Code but works with any MCP client.
 
 ## What it does
 
 - **UART probing:** detect baud rates, capture serial output, interact with debug consoles
+- **SPI flash:** probe JEDEC ID, read/dump/write SPI flash chips (W25Q series, SOIC-8 clip)
+- **I2C bus:** scan for devices, read/write registers, dump EEPROM contents
+- **1-Wire:** enumerate devices, read ROM codes (DS18B20, iButton)
 - **Power control:** voltage/current management with safety tiers
 - **GPIO control:** toggle pins for bootloader entry (ESP32, ESP8266, etc.)
 - **Flash extraction:** dump firmware through UART bridge via esptool
-- **Engagement logging:** timestamped raw logs, per-engagement folders, config.json
+- **Engagement logging:** per-protocol logs (UART text, SPI/I2C/1-Wire JSONL), per-engagement folders
 
 ## Requirements
 
@@ -65,6 +68,26 @@ Set `PIDEV_ENGAGEMENTS_DIR` environment variable to control where engagement log
 | `read_flash` | allowed-write | Dump flash via esptool through UART bridge |
 | `set_voltage` | approval-write | Set PSU voltage (requires confirmation) |
 | `set_power` | approval-write | Enable/disable PSU (requires confirmation) |
+| **SPI** | | |
+| `open_spi` | allowed-write | Configure SPI mode, create session |
+| `spi_probe` | read-only | Read JEDEC ID + status register, decode chip |
+| `spi_read` | read-only | Read N bytes from SPI flash address |
+| `spi_dump` | read-only | Full flash dump to binary file |
+| `spi_write` | approval-write | Erase + program + verify SPI flash (requires confirmation) |
+| `spi_transfer` | read-only | Raw SPI transfer (hex in/out) |
+| `close_spi` | allowed-write | Close SPI session, reset mode |
+| **I2C** | | |
+| `open_i2c` | allowed-write | Configure I2C mode, create session |
+| `i2c_scan` | read-only | Scan bus for devices (0x00-0x7F) |
+| `i2c_read` | read-only | Read bytes from device + register |
+| `i2c_write` | approval-write | Write bytes to device + register (requires confirmation) |
+| `i2c_dump` | read-only | Dump EEPROM contents to file |
+| `close_i2c` | allowed-write | Close I2C session, reset mode |
+| **1-Wire** | | |
+| `open_1wire` | allowed-write | Configure 1-Wire mode, create session |
+| `onewire_search` | read-only | Reset bus, Read ROM, decode family code |
+| `onewire_read` | read-only | Raw 1-Wire transaction |
+| `close_1wire` | allowed-write | Close 1-Wire session, reset mode |
 
 ## Safety Model
 
@@ -72,7 +95,7 @@ Three tiers enforced at the MCP server boundary:
 
 - **read-only:** full autonomy, no side effects
 - **allowed-write:** autonomous execution, all calls logged
-- **approval-write:** blocks until human confirms via `_confirmed` parameter. Wrong voltage fries chips.
+- **approval-write:** blocks until human confirms via `_confirmed` parameter. Wrong voltage fries chips. SPI flash writes and I2C writes overwrite data irreversibly.
 
 ## BusPirate 6 Setup
 
@@ -106,7 +129,7 @@ The `open_uart` tool accepts an optional `project_path` parameter. When provided
 ## Tests
 
 ```bash
-pytest              # 77 tests, no hardware needed
+pytest              # 172 tests, no hardware needed
 pytest -m hardware  # integration tests, BP6 must be connected
 ```
 
