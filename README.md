@@ -1,6 +1,6 @@
 # buspirate-mcp
 
-MCP server for BusPirate 6 hardware security testing. Exposes UART, SPI, I2C, 1-Wire, power supply, and GPIO operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools over stdio transport. 28 tools across 4 bus protocols.
+MCP server for BusPirate 6 hardware security testing. Exposes UART, SPI, I2C, 1-Wire, power supply, GPIO, and logic analyzer operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools over stdio transport. 33 tools across 4 bus protocols + logic analyzer.
 
 Built for use with Claude Code but works with any MCP client.
 
@@ -13,6 +13,7 @@ Built for use with Claude Code but works with any MCP client.
 - **Power control:** voltage/current management with safety tiers
 - **GPIO control:** toggle pins for bootloader entry (ESP32, ESP8266, etc.)
 - **Flash extraction:** dump firmware through UART bridge via esptool
+- **Logic analyzer:** follow-along capture at 75 MHz on all 8 IO pins with protocol identification
 - **Engagement logging:** per-protocol logs (UART text, SPI/I2C/1-Wire JSONL), per-engagement folders
 
 ## Requirements
@@ -88,6 +89,12 @@ Set `PIDEV_ENGAGEMENTS_DIR` environment variable to control where engagement log
 | `onewire_search` | read-only | Reset bus, Read ROM, decode family code |
 | `onewire_read` | read-only | Raw 1-Wire transaction |
 | `close_1wire` | allowed-write | Close 1-Wire session, reset mode |
+| **Logic Analyzer** | | |
+| `la_prepare` | allowed-write | Switch to FALA mode, enter bus protocol for capture |
+| `la_command` | read-only | Execute bus command and capture signal data |
+| `la_analyze` | read-only | Analyze capture for signal characteristics |
+| `la_identify` | read-only | Auto-identify bus protocols from capture |
+| `la_cleanup` | allowed-write | Restore BPIO2 mode |
 
 ## Safety Model
 
@@ -129,7 +136,7 @@ The `open_uart` tool accepts an optional `project_path` parameter. When provided
 ## Tests
 
 ```bash
-pytest              # 172 tests, no hardware needed
+pytest              # 203 tests, no hardware needed
 pytest -m hardware  # integration tests, BP6 must be connected
 ```
 
