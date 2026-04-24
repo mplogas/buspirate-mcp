@@ -34,6 +34,7 @@ from buspirate_mcp.tools import (
     tool_close_spi,
     _ascii_score,
     _onewire_crc8,
+    _validate_la_command,
 )
 from buspirate_mcp.session import SessionManager
 
@@ -745,6 +746,23 @@ class TestSPIProbe:
         assert "Unknown" in result["manufacturer"]
 
     @pytest.mark.asyncio
+    async def test_bogus_jedec_capacity_capped_at_64mb(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        mock_hw = MagicMock()
+        # Capacity code 0xFF would be 2^255 bytes without the cap
+        mock_hw.spi_transfer.side_effect = [
+            [0xEF, 0x40, 0xFF],
+            [0x00],
+        ]
+        session = mgr.create(
+            name="test", hardware=mock_hw, protocol="spi",
+        )
+        result = await tool_spi_probe(
+            session_manager=mgr, session_id=session.session_id,
+        )
+        assert result["capacity_bytes"] == 64 * 1024 * 1024
+
+    @pytest.mark.asyncio
     async def test_logs_both_transactions(self, tmp_path):
         mgr = SessionManager(engagements_dir=tmp_path)
         mock_hw = MagicMock()
@@ -1445,6 +1463,62 @@ class TestI2CDump:
         # Preview should be hex of first 64 bytes = 128 hex chars
         assert len(result["hex_preview"]) == 128
 
+    @pytest.mark.asyncio
+    async def test_register_bytes_2_sends_msb_first(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        mock_hw = MagicMock()
+        mock_hw.i2c_transfer.return_value = bytes(32)
+        session = mgr.create(
+            name="test", hardware=mock_hw, protocol="i2c",
+        )
+        # Read 64 bytes starting at offset 0x1234 with 16-bit addressing
+        await tool_i2c_dump(
+            session_manager=mgr,
+            session_id=session.session_id,
+            device_addr="0x50",
+            size=64,
+            register_bytes=2,
+        )
+        # First call should have [addr_write, 0x00, 0x00] for offset 0
+        first_call_args = mock_hw.i2c_transfer.call_args_list[0]
+        assert first_call_args[0][0] == [0xA0, 0x00, 0x00]
+        # Second call at offset 32 should be [addr_write, 0x00, 0x20]
+        second_call_args = mock_hw.i2c_transfer.call_args_list[1]
+        assert second_call_args[0][0] == [0xA0, 0x00, 0x20]
+
+    @pytest.mark.asyncio
+    async def test_register_bytes_invalid_rejected(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        mock_hw = MagicMock()
+        session = mgr.create(
+            name="test", hardware=mock_hw, protocol="i2c",
+        )
+        result = await tool_i2c_dump(
+            session_manager=mgr,
+            session_id=session.session_id,
+            device_addr="0x50",
+            size=64,
+            register_bytes=4,
+        )
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_register_bytes_1_rejects_oversize(self, tmp_path):
+        mgr = SessionManager(engagements_dir=tmp_path)
+        mock_hw = MagicMock()
+        session = mgr.create(
+            name="test", hardware=mock_hw, protocol="i2c",
+        )
+        # 8-bit addressing can't go beyond 256 bytes
+        result = await tool_i2c_dump(
+            session_manager=mgr,
+            session_id=session.session_id,
+            device_addr="0x50",
+            size=512,
+            register_bytes=1,
+        )
+        assert "error" in result
+
 
 class TestCloseI2C:
     @pytest.mark.asyncio
@@ -1473,3 +1547,32 @@ class TestCloseI2C:
             session_manager=mgr, session_id=session.session_id, hardware=mock_hw,
         )
         mock_hw.reset_mode.assert_called_once()
+
+
+class TestValidateLaCommand:
+    def test_valid_simple(self):
+        assert _validate_la_command("[0x9f r:3]") is None
+
+    def test_valid_multi_transaction(self):
+        assert _validate_la_command("[0x9f r:3][0x05 r]") is None
+
+    def test_empty(self):
+        assert "empty" in _validate_la_command("")
+
+    def test_whitespace_only(self):
+        assert "empty" in _validate_la_command("   ")
+
+    def test_too_long(self):
+        assert "too long" in _validate_la_command("[" + "a" * 600 + "]")
+
+    def test_newline_rejected(self):
+        assert "control" in _validate_la_command("[0x9f]\n[0x05]")
+
+    def test_non_ascii_rejected(self):
+        assert "control" in _validate_la_command("[0x9f é r:3]")
+
+    def test_unbalanced_brackets(self):
+        assert "unbalanced" in _validate_la_command("[0x9f r:3")
+
+    def test_no_brackets(self):
+        assert "missing bus transaction brackets" in _validate_la_command("0x9f r:3")

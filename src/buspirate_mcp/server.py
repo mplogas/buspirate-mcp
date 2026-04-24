@@ -456,6 +456,16 @@ TOOL_DEFINITIONS = [
                     "description": "7-bit device address (hex string like '0x50' or integer)",
                 },
                 "size": {"type": "integer", "default": 256, "description": "Number of bytes to dump"},
+                "register_bytes": {
+                    "type": "integer",
+                    "enum": [1, 2],
+                    "default": 1,
+                    "description": (
+                        "Register/memory address width. 1 for most small EEPROMs "
+                        "and sensors (up to 256 bytes). 2 for 24C32+ and larger "
+                        "EEPROMs (up to 64KB)."
+                    ),
+                },
             },
             "required": ["session_id", "device_addr"],
         },
@@ -659,7 +669,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     # MCP clients that respect destructiveHint will prompt the user,
     # but we enforce server-side too for clients that don't.
     if tier == SafetyTier.APPROVAL_WRITE:
-        if not arguments.get("_confirmed", False):
+        # Strict: _confirmed must be the literal boolean True. Truthy values
+        # like 1, "true", or "yes" do NOT satisfy the gate -- they often leak
+        # in from loose JSON decoders or mistakes in client code.
+        if arguments.get("_confirmed") is not True:
             desc = f"{name}({', '.join(f'{k}={v}' for k, v in arguments.items())})"
             return [TextContent(
                 type="text",
@@ -668,7 +681,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "tool": name,
                     "arguments": arguments,
                     "message": f"APPROVAL REQUIRED: {desc}. "
-                    f"Re-call with _confirmed=true to execute.",
+                    f"Re-call with _confirmed=true (boolean) to execute.",
                 }),
             )]
         # Remove the confirmation token before passing to the tool
@@ -873,6 +886,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 session_id=arguments["session_id"],
                 device_addr=arguments["device_addr"],
                 size=arguments.get("size", 256),
+                register_bytes=arguments.get("register_bytes", 1),
             )
 
         elif name == "close_i2c":

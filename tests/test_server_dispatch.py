@@ -101,3 +101,20 @@ async def test_unknown_tool():
     """Unknown tool names raise ValueError from classify_tool."""
     with pytest.raises(ValueError, match="Unknown tool"):
         await server.call_tool("nonexistent_tool", {})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "confirmed_value",
+    [False, None, 0, "", "true", "yes", 1, "True"],
+)
+async def test_confirmed_requires_literal_true(confirmed_value):
+    """Approval-write tools must reject anything that isn't the literal bool True."""
+    args = {
+        "voltage_v": 3.3,
+        "current_limit_ma": 100,
+        "_confirmed": confirmed_value,
+    }
+    result = await server.call_tool("set_voltage", args)
+    data = json.loads(result[0].text)
+    assert data.get("confirmation_required") is True

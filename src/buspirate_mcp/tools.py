@@ -844,8 +844,23 @@ async def tool_i2c_dump(
     session_id: str,
     device_addr: str | int,
     size: int = 256,
+    register_bytes: int = 1,
 ) -> dict[str, Any]:
-    """Dump memory from an I2C device by reading all registers sequentially."""
+    """Dump memory from an I2C device by reading all registers sequentially.
+
+    register_bytes=1 for devices with 8-bit register/memory addresses (most small
+    EEPROMs, sensors). register_bytes=2 for 16-bit addresses (24C32+, larger
+    EEPROMs) -- address sent MSB first.
+    """
+    if register_bytes not in (1, 2):
+        return {"error": f"register_bytes must be 1 or 2, got {register_bytes}"}
+    max_addr = 256 if register_bytes == 1 else 65536
+    if size > max_addr:
+        return {
+            "error": f"size {size} exceeds {max_addr}-byte address space "
+                     f"for register_bytes={register_bytes}"
+        }
+
     session = session_manager.get(session_id)
     addr_7bit = _parse_device_addr(device_addr)
     addr_write = (addr_7bit << 1) & 0xFE
@@ -855,7 +870,10 @@ async def tool_i2c_dump(
 
     for offset in range(0, size, chunk_size):
         count = min(chunk_size, size - offset)
-        write_data = [addr_write, offset]
+        if register_bytes == 1:
+            write_data = [addr_write, offset & 0xFF]
+        else:
+            write_data = [addr_write, (offset >> 8) & 0xFF, offset & 0xFF]
         chunk = session.hardware.i2c_transfer(write_data, read_bytes=count)
         if chunk:
             all_data.extend(chunk)
@@ -874,6 +892,7 @@ async def tool_i2c_dump(
         metadata={
             "address": f"0x{addr_7bit:02X}",
             "size": size,
+            "register_bytes": register_bytes,
             "bytes_read": len(all_data),
             "file": str(dump_file),
         },
@@ -909,6 +928,22 @@ def _human_size(n: int) -> str:
     if n >= 1024:
         return f"{n / 1024:.0f} KB"
     return f"{n} B"
+
+
+# Cap JEDEC-derived sizes to 64 MB. Capacity code > 26 (2^26) is almost
+# always a bogus read on a disconnected or misbehaving chip, not a real
+# 128 MB+ device. Without this cap, a bad byte causes a multi-GB allocation.
+SPI_MAX_CAPACITY_BYTES = 64 * 1024 * 1024
+
+
+def _jedec_capacity_bytes(capacity_code: int) -> int:
+    """Convert JEDEC capacity byte (jedec_bytes[2]) to bytes, capped at 64MB."""
+    if capacity_code <= 0:
+        return 0
+    size = 1 << capacity_code
+    if size > SPI_MAX_CAPACITY_BYTES:
+        return SPI_MAX_CAPACITY_BYTES
+    return size
 
 
 async def tool_open_spi(
@@ -984,7 +1019,7 @@ async def tool_spi_probe(
     manufacturer = SPI_MANUFACTURERS.get(
         jedec_bytes[0], f"Unknown (0x{jedec_bytes[0]:02X})"
     )
-    capacity_bytes = 2 ** jedec_bytes[2] if jedec_bytes[2] > 0 else 0
+    capacity_bytes = _jedec_capacity_bytes(jedec_bytes[2])
 
     return {
         "jedec_id": jedec_bytes.hex().upper(),
@@ -1060,7 +1095,7 @@ async def tool_spi_dump(
     if size is None:
         jedec = hw.spi_transfer([SPI_CMD_JEDEC_ID], 3)
         jedec_bytes = bytes(jedec)
-        size = 2 ** jedec_bytes[2] if jedec_bytes[2] > 0 else 0
+        size = _jedec_capacity_bytes(jedec_bytes[2])
         if size == 0:
             return {
                 "error": "Could not auto-detect flash size. "
@@ -1298,12 +1333,39 @@ async def tool_la_prepare(
         return {"error": str(exc)}
 
 
+_LA_COMMAND_RE = re.compile(r"^[\x20-\x7E]+$")
+
+
+def _validate_la_command(command: str) -> str | None:
+    """Validate a BP6 bus command before sending to the terminal.
+
+    BP6 bus commands use square brackets for transactions (e.g. `[0x9F r:3]`).
+    Return an error string if invalid, None if OK.
+    """
+    if not command or not command.strip():
+        return "la_command: empty command"
+    if len(command) > 512:
+        return f"la_command: command too long ({len(command)} > 512)"
+    if not _LA_COMMAND_RE.fullmatch(command):
+        return "la_command: command contains control or non-ASCII characters"
+    opens = command.count("[")
+    closes = command.count("]")
+    if opens != closes:
+        return f"la_command: unbalanced brackets ({opens} '[' vs {closes} ']')"
+    if opens == 0:
+        return "la_command: missing bus transaction brackets '[...]'"
+    return None
+
+
 async def tool_la_command(
     session_manager: SessionManager,
     session_id: str,
     command: str,
 ) -> dict[str, Any]:
     """Execute a bus command and capture FALA data."""
+    err = _validate_la_command(command)
+    if err is not None:
+        return {"error": err}
     try:
         session = session_manager.get(session_id)
         fala = session.hardware  # FALASession stored here

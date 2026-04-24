@@ -14,6 +14,8 @@ import re
 import time
 from typing import Any
 
+from buspirate_mcp.la_parsers import parse_fala_notification
+
 try:
     import serial
 except ImportError:
@@ -222,7 +224,7 @@ class FALASession:
                     # Find the complete notification line
                     for line in text.split("\n"):
                         if line.startswith("$FALADATA"):
-                            return self.parse_notification(line.strip())
+                            return parse_fala_notification(line.strip())
             time.sleep(0.05)
         logger.warning("No FALA notification received within %.1fs", timeout)
         return None
@@ -284,19 +286,3 @@ class FALASession:
         self._term = None
         self._fala = None
 
-    @staticmethod
-    def parse_notification(line: str) -> dict:
-        """Parse '$FALADATA;8;0;0;N;75000000;7468;0;' into dict."""
-        line = line.strip().rstrip(';')
-        parts = line.split(';')
-        if len(parts) < 8 or parts[0] != '$FALADATA':
-            return {"error": f"Invalid notification: {line}"}
-        return {
-            "channels": int(parts[1]),
-            "trigger_pin": int(parts[2]),
-            "trigger_mask": int(parts[3]),
-            "edge_trigger": parts[4] == 'Y',
-            "sample_rate_hz": int(parts[5]),
-            "samples": int(parts[6]),
-            "pre_samples": int(parts[7]),
-        }

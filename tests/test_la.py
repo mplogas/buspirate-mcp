@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from buspirate_mcp.la import FALASession
+from buspirate_mcp.la_parsers import parse_fala_notification
 
 
 class FakeTerminal:
@@ -187,7 +188,7 @@ class FakeFALA:
 
 class TestParseNotification:
     def test_valid_notification(self):
-        result = FALASession.parse_notification('$FALADATA;8;0;0;N;75000000;7468;0;')
+        result = parse_fala_notification('$FALADATA;8;0;0;N;75000000;7468;0;')
         assert result["channels"] == 8
         assert result["sample_rate_hz"] == 75000000
         assert result["samples"] == 7468
@@ -195,18 +196,18 @@ class TestParseNotification:
         assert result["pre_samples"] == 0
 
     def test_edge_trigger_enabled(self):
-        result = FALASession.parse_notification('$FALADATA;8;1;1;Y;50000000;1000;500;')
+        result = parse_fala_notification('$FALADATA;8;1;1;Y;50000000;1000;500;')
         assert result["edge_trigger"] is True
         assert result["trigger_pin"] == 1
         assert result["trigger_mask"] == 1
         assert result["pre_samples"] == 500
 
     def test_invalid_notification(self):
-        result = FALASession.parse_notification('GARBAGE')
+        result = parse_fala_notification('GARBAGE')
         assert "error" in result
 
     def test_truncated_notification(self):
-        result = FALASession.parse_notification('$FALADATA;8;0')
+        result = parse_fala_notification('$FALADATA;8;0')
         assert "error" in result
 
 
