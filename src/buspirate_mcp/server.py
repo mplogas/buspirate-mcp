@@ -56,17 +56,24 @@ def _get_hardware(port: str | None = None) -> BusPirateHardware:
     return _hardware
 
 
+# Duration class convention (consistent across pidev-sec tool MCPs):
+#   instant    -- <1 s wall clock, foregroundable always
+#   fast       -- 1-10 s, foregroundable
+#   slow       -- 10 s-2 min, background-dispatch recommended
+#   very-slow  -- >2 min, background-dispatch effectively required
+
 TOOL_DEFINITIONS = [
     Tool(
         name="list_devices",
-        description="Find BusPirate devices on USB CDC serial ports. [read-only]",
+        description="Find BusPirate devices on USB CDC serial ports. [read-only] [Duration: instant.]",
         inputSchema={"type": "object", "properties": {}, "required": []},
     ),
     Tool(
         name="verify_connection",
         description=(
             "Check for signal activity on specified pins. "
-            "User must provide pin mapping. [read-only]"
+            "User must provide pin mapping. "
+            "[read-only] [Duration: fast (~2 s -- samples for sample_duration_ms, default 2000).]"
         ),
         inputSchema={
             "type": "object",
@@ -85,7 +92,9 @@ TOOL_DEFINITIONS = [
         name="scan_baud",
         description=(
             "Scan common baud rates and score by readable ASCII output. "
-            "Returns candidates sorted by confidence. [read-only]"
+            "Returns candidates sorted by confidence. "
+            "[read-only] [Duration: slow (~15-60 s -- cycles through common baud rates, "
+            "samples each for a short window). Background-dispatch recommended.]"
         ),
         inputSchema={
             "type": "object",
@@ -97,7 +106,8 @@ TOOL_DEFINITIONS = [
         name="open_uart",
         description=(
             "Open a persistent UART connection and start an engagement. "
-            "Creates engagement folder and raw logging. [allowed-write]"
+            "Creates engagement folder and raw logging. "
+            "[allowed-write] [Duration: fast (~0.5-2 s -- mode switch + folder creation).]"
         ),
         inputSchema={
             "type": "object",
@@ -118,7 +128,9 @@ TOOL_DEFINITIONS = [
         name="read_output",
         description=(
             "Read available data from an open UART session. "
-            "Blocks up to timeout. [read-only]"
+            "Blocks up to timeout. "
+            "[read-only] [Duration: fast (~timeout_ms; default 5 s). "
+            "Returns earlier if data is available.]"
         ),
         inputSchema={
             "type": "object",
@@ -132,7 +144,9 @@ TOOL_DEFINITIONS = [
     Tool(
         name="send_command",
         description=(
-            "Send a command over UART and capture the response. [allowed-write]"
+            "Send a command over UART and capture the response. "
+            "[allowed-write] [Duration: fast (~timeout_ms; default 3 s). "
+            "Returns earlier when response is received.]"
         ),
         inputSchema={
             "type": "object",
@@ -146,7 +160,7 @@ TOOL_DEFINITIONS = [
     ),
     Tool(
         name="close_uart",
-        description="Close a UART session and finalize logs. [allowed-write]",
+        description="Close a UART session and finalize logs. [allowed-write] [Duration: instant.]",
         inputSchema={
             "type": "object",
             "properties": {
@@ -159,7 +173,8 @@ TOOL_DEFINITIONS = [
         name="set_voltage",
         description=(
             "Set power supply voltage (0.8-5.0V) and current limit (0-500mA). "
-            "DANGEROUS: wrong voltage can damage target hardware. [approval-write]"
+            "DANGEROUS: wrong voltage can damage target hardware. "
+            "[approval-write] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -176,7 +191,8 @@ TOOL_DEFINITIONS = [
         name="set_power",
         description=(
             "Enable or disable the power supply. "
-            "DANGEROUS: affects power to target device. [approval-write]"
+            "DANGEROUS: affects power to target device. "
+            "[approval-write] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -193,7 +209,8 @@ TOOL_DEFINITIONS = [
         description=(
             "Put target into UART download mode by toggling GPIO pins. "
             "Holds boot pin LOW, pulses reset pin, releases. "
-            "Works for ESP32, ESP8266, and similar chips. [allowed-write]"
+            "Works for ESP32, ESP8266, and similar chips. "
+            "[allowed-write] [Duration: fast (~1-2 s -- GPIO toggle sequence).]"
         ),
         inputSchema={
             "type": "object",
@@ -214,7 +231,10 @@ TOOL_DEFINITIONS = [
         name="read_flash",
         description=(
             "Read flash memory from target via esptool through BP6 UART bridge. "
-            "Optionally enters download mode first. Requires esptool installed. [allowed-write]"
+            "Optionally enters download mode first. Requires esptool installed. "
+            "[allowed-write] [Duration: very-slow (~3-5 min for 1-2 MiB at 460800 baud; "
+            "larger images proportionally longer). Background-dispatch required. "
+            "Bridge mode persists after dump -- press BP6 button or USB-replug to exit.]"
         ),
         inputSchema={
             "type": "object",
@@ -252,7 +272,8 @@ TOOL_DEFINITIONS = [
         name="open_spi",
         description=(
             "Open an SPI connection and start an engagement. "
-            "Configures SPI mode on the BusPirate, creates engagement folder. [allowed-write]"
+            "Configures SPI mode on the BusPirate, creates engagement folder. "
+            "[allowed-write] [Duration: fast (~0.5-2 s -- mode switch + folder creation).]"
         ),
         inputSchema={
             "type": "object",
@@ -276,7 +297,8 @@ TOOL_DEFINITIONS = [
         name="spi_probe",
         description=(
             "Read JEDEC ID and status register from an SPI flash chip. "
-            "Returns manufacturer, capacity, and write-protect status. [read-only]"
+            "Returns manufacturer, capacity, and write-protect status. "
+            "[read-only] [Duration: fast (~0.5-1 s -- JEDEC 0x9F sequence).]"
         ),
         inputSchema={
             "type": "object",
@@ -290,7 +312,9 @@ TOOL_DEFINITIONS = [
         name="spi_read",
         description=(
             "Read a region of SPI flash memory starting at a given address. "
-            "Saves to artifacts. [read-only]"
+            "Saves to artifacts. "
+            "[read-only] [Duration: fast for small reads; slow for large regions "
+            "(parameterized by length -- ~1 s per 4 KiB at 1 MHz).]"
         ),
         inputSchema={
             "type": "object",
@@ -306,7 +330,9 @@ TOOL_DEFINITIONS = [
         name="spi_dump",
         description=(
             "Dump the entire SPI flash to a file. Auto-detects size from JEDEC ID "
-            "if not provided. [read-only]"
+            "if not provided. "
+            "[read-only] [Duration: slow (~1-3 min for a typical 4-8 MiB flash at 1 MHz "
+            "with 512-byte chunks). Background-dispatch recommended.]"
         ),
         inputSchema={
             "type": "object",
@@ -323,7 +349,9 @@ TOOL_DEFINITIONS = [
         name="spi_write",
         description=(
             "Write a binary file to SPI flash. Optionally erases first and verifies. "
-            "DANGEROUS: overwrites flash contents irreversibly. [approval-write]"
+            "DANGEROUS: overwrites flash contents irreversibly. "
+            "[approval-write] [Duration: slow (~1-5 min -- chip erase + page program "
+            "+ optional verify; parameterized by image size). Background-dispatch recommended.]"
         ),
         inputSchema={
             "type": "object",
@@ -341,7 +369,8 @@ TOOL_DEFINITIONS = [
     Tool(
         name="spi_transfer",
         description=(
-            "Send a raw SPI transaction. Write hex bytes and optionally read back. [read-only]"
+            "Send a raw SPI transaction. Write hex bytes and optionally read back. "
+            "[read-only] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -355,7 +384,7 @@ TOOL_DEFINITIONS = [
     ),
     Tool(
         name="close_spi",
-        description="Close an SPI session and reset the BusPirate to HiZ mode. [allowed-write]",
+        description="Close an SPI session and reset the BusPirate to HiZ mode. [allowed-write] [Duration: instant.]",
         inputSchema={
             "type": "object",
             "properties": {
@@ -369,7 +398,8 @@ TOOL_DEFINITIONS = [
         name="open_i2c",
         description=(
             "Open an I2C connection and start an engagement. "
-            "Configures I2C mode with pullups enabled. [allowed-write]"
+            "Configures I2C mode with pullups enabled. "
+            "[allowed-write] [Duration: fast (~0.5-2 s -- mode switch + folder creation).]"
         ),
         inputSchema={
             "type": "object",
@@ -390,7 +420,9 @@ TOOL_DEFINITIONS = [
     Tool(
         name="i2c_scan",
         description=(
-            "Scan the I2C bus for devices. Returns 7-bit addresses with device hints. [read-only]"
+            "Scan the I2C bus for devices. Returns 7-bit addresses with device hints. "
+            "[read-only] [Duration: slow (~3-10 s -- sweeps all 128 7-bit addresses). "
+            "Background-dispatch recommended.]"
         ),
         inputSchema={
             "type": "object",
@@ -403,7 +435,8 @@ TOOL_DEFINITIONS = [
     Tool(
         name="i2c_read",
         description=(
-            "Read bytes from an I2C device, optionally from a specific register. [read-only]"
+            "Read bytes from an I2C device, optionally from a specific register. "
+            "[read-only] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -423,7 +456,8 @@ TOOL_DEFINITIONS = [
         name="i2c_write",
         description=(
             "Write bytes to an I2C device register. "
-            "DANGEROUS: may alter device configuration or EEPROM contents. [approval-write]"
+            "DANGEROUS: may alter device configuration or EEPROM contents. "
+            "[approval-write] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -445,7 +479,10 @@ TOOL_DEFINITIONS = [
         name="i2c_dump",
         description=(
             "Dump memory from an I2C device by reading all registers sequentially. "
-            "Saves to artifacts. [read-only]"
+            "Saves to artifacts. "
+            "[read-only] [Duration: slow for large sizes (~1-2 min for 64 KB EEPROM). "
+            "Fast for small sizes (256 bytes ~2-5 s). Parameterized by size. "
+            "Background-dispatch recommended for large dumps.]"
         ),
         inputSchema={
             "type": "object",
@@ -472,7 +509,7 @@ TOOL_DEFINITIONS = [
     ),
     Tool(
         name="close_i2c",
-        description="Close an I2C session and reset the BusPirate to HiZ mode. [allowed-write]",
+        description="Close an I2C session and reset the BusPirate to HiZ mode. [allowed-write] [Duration: instant.]",
         inputSchema={
             "type": "object",
             "properties": {
@@ -486,7 +523,8 @@ TOOL_DEFINITIONS = [
         name="open_1wire",
         description=(
             "Open a 1-Wire connection and start an engagement. "
-            "Configures 1-Wire mode with pullup enabled. [allowed-write]"
+            "Configures 1-Wire mode with pullup enabled. "
+            "[allowed-write] [Duration: fast (~0.5-2 s -- mode switch + folder creation).]"
         ),
         inputSchema={
             "type": "object",
@@ -507,7 +545,8 @@ TOOL_DEFINITIONS = [
         description=(
             "Search for a device on the 1-Wire bus using Read ROM (0x33). "
             "Returns family code, serial number, and CRC validity. "
-            "Works when exactly one device is present. [read-only]"
+            "Works when exactly one device is present. "
+            "[read-only] [Duration: fast (~1-3 s -- Read ROM sequence).]"
         ),
         inputSchema={
             "type": "object",
@@ -520,7 +559,8 @@ TOOL_DEFINITIONS = [
     Tool(
         name="onewire_read",
         description=(
-            "Send arbitrary bytes on the 1-Wire bus and read back a response. [read-only]"
+            "Send arbitrary bytes on the 1-Wire bus and read back a response. "
+            "[read-only] [Duration: instant.]"
         ),
         inputSchema={
             "type": "object",
@@ -534,7 +574,7 @@ TOOL_DEFINITIONS = [
     ),
     Tool(
         name="close_1wire",
-        description="Close a 1-Wire session and reset the BusPirate to HiZ mode. [allowed-write]",
+        description="Close a 1-Wire session and reset the BusPirate to HiZ mode. [allowed-write] [Duration: instant.]",
         inputSchema={
             "type": "object",
             "properties": {
@@ -549,7 +589,9 @@ TOOL_DEFINITIONS = [
         description=(
             "Switch to FALA (Follow Along Logic Analyzer) mode and enter a bus "
             "protocol for signal capture. Disconnects BPIO2. Captures all 8 IO pins "
-            "at up to 75 MHz every time a bus command runs. [allowed-write]"
+            "at up to 75 MHz every time a bus command runs. "
+            "[allowed-write] [Duration: fast (~1-3 s -- binmode switch + terminal config). "
+            "Lifecycle: persistent -- BPIO2 is disconnected until la_cleanup.]"
         ),
         inputSchema={
             "type": "object",
@@ -580,7 +622,9 @@ TOOL_DEFINITIONS = [
         description=(
             "Execute a bus command on the terminal and capture FALA data. "
             "Uses BP6 terminal syntax: SPI [0x9f r:3], I2C [0xa0 0x00 r:16], etc. "
-            "Returns both decoded terminal output and raw signal capture. [read-only]"
+            "Returns both decoded terminal output and raw signal capture. "
+            "[read-only] [Duration: slow (~10+ s -- waits for FALA capture notification "
+            "after the bus command completes). Background-dispatch recommended.]"
         ),
         inputSchema={
             "type": "object",
@@ -601,7 +645,8 @@ TOOL_DEFINITIONS = [
         name="la_analyze",
         description=(
             "Analyze a FALA capture for signal characteristics: transitions, frequency, "
-            "duty cycle, idle state, and role identification per channel. [read-only]"
+            "duty cycle, idle state, and role identification per channel. "
+            "[read-only] [Duration: fast (~1-5 s -- in-process signal analysis).]"
         ),
         inputSchema={
             "type": "object",
@@ -624,7 +669,8 @@ TOOL_DEFINITIONS = [
         name="la_identify",
         description=(
             "Auto-identify bus protocols from a FALA capture using signal heuristics. "
-            "Returns ranked candidates with confidence scores and channel mappings. [read-only]"
+            "Returns ranked candidates with confidence scores and channel mappings. "
+            "[read-only] [Duration: fast (~1-5 s -- in-process heuristic analysis).]"
         ),
         inputSchema={
             "type": "object",
@@ -642,7 +688,8 @@ TOOL_DEFINITIONS = [
         name="la_cleanup",
         description=(
             "Deactivate FALA and restore BPIO2 mode. After this call, BPIO2 tools "
-            "(SPI, I2C, UART, 1-Wire) are available again. [allowed-write]"
+            "(SPI, I2C, UART, 1-Wire) are available again. "
+            "[allowed-write] [Duration: fast (~1-3 s -- binmode switch back to BPIO2).]"
         ),
         inputSchema={
             "type": "object",
