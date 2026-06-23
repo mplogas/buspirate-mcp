@@ -193,7 +193,7 @@ async def tool_open_uart(
     pins: dict[str, str],
     engagement_name: str,
     device_path: str = "",
-    project_path: str | None = None,
+    engagement_path: str | None = None,
 ) -> dict[str, Any]:
     """Open a persistent UART session and start logging."""
     hardware.configure_uart(speed=baud)
@@ -203,7 +203,7 @@ async def tool_open_uart(
         baud=baud,
         pins=pins,
         device_path=device_path,
-        project_path=project_path,
+        engagement_path=engagement_path,
     )
     return {
         "session_id": session.session_id,
@@ -555,7 +555,7 @@ async def tool_open_1wire(
     engagement_name: str,
     voltage_mv: int | None = None,
     current_ma: int | None = None,
-    project_path: str | None = None,
+    engagement_path: str | None = None,
 ) -> dict[str, Any]:
     """Configure 1-Wire mode and open a transaction session."""
     hardware.configure_1wire(voltage_mv, current_ma)
@@ -567,7 +567,7 @@ async def tool_open_1wire(
             "voltage_mv": voltage_mv,
             "current_ma": current_ma,
         },
-        project_path=project_path,
+        engagement_path=engagement_path,
     )
     return {
         "session_id": session.session_id,
@@ -699,7 +699,7 @@ async def tool_open_i2c(
     clock_stretch: bool = False,
     voltage_mv: int | None = None,
     current_ma: int | None = None,
-    project_path: str | None = None,
+    engagement_path: str | None = None,
 ) -> dict[str, Any]:
     """Open a persistent I2C session and start logging."""
     hardware.configure_i2c(speed, clock_stretch, voltage_mv, current_ma)
@@ -713,7 +713,7 @@ async def tool_open_i2c(
             "voltage_mv": voltage_mv,
             "current_ma": current_ma,
         },
-        project_path=project_path,
+        engagement_path=engagement_path,
     )
     return {
         "session_id": session.session_id,
@@ -956,7 +956,7 @@ async def tool_open_spi(
     chip_select_idle: bool = True,
     voltage_mv: int | None = None,
     current_ma: int | None = None,
-    project_path: str | None = None,
+    engagement_path: str | None = None,
 ) -> dict[str, Any]:
     """Configure SPI mode on the BusPirate and create an engagement session."""
     hardware.configure_spi(
@@ -976,7 +976,7 @@ async def tool_open_spi(
             "cpol": clock_polarity,
             "cpha": clock_phase,
         },
-        project_path=project_path,
+        engagement_path=engagement_path,
     )
     return {
         "session_id": session.session_id,
@@ -1290,7 +1290,7 @@ async def tool_la_prepare(
     engagement_name: str,
     protocol: str,
     protocol_config: dict | None = None,
-    project_path: str | None = None,
+    engagement_path: str | None = None,
 ) -> dict[str, Any]:
     """Switch to FALA mode and enter a bus protocol for capture."""
     try:
@@ -1320,7 +1320,7 @@ async def tool_la_prepare(
             hardware=fala,
             protocol="la",
             protocol_config={"bus_protocol": protocol, **result},
-            project_path=project_path,
+            engagement_path=engagement_path,
         )
 
         return {
