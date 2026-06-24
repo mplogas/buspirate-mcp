@@ -168,7 +168,7 @@ class SessionManager:
         baud: int = 0,
         pins: dict[str, str] | None = None,
         device_path: str = "",
-        project_path: str | None = None,
+        engagement_path: str | None = None,
         protocol: str = "uart",
         protocol_config: dict | None = None,
     ) -> Session | TransactionSession:
@@ -177,10 +177,10 @@ class SessionManager:
         if prefix is None:
             raise ValueError(f"Unknown protocol: {protocol}")
 
-        if project_path is not None:
-            resolved = Path(project_path).resolve()
+        if engagement_path is not None:
+            resolved = Path(engagement_path).resolve()
             if not resolved.is_relative_to(self._engagements_dir.resolve()):
-                raise ValueError("project_path must be under engagements directory")
+                raise ValueError("engagement_path must be under engagements directory")
             subdir = _PROTOCOL_PROJECT_SUBDIR[protocol]
             engagement_path = resolved / subdir
             engagement_path.mkdir(parents=True, exist_ok=True)

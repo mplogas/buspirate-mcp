@@ -124,7 +124,7 @@ Free pins (IO0-IO3, IO6-IO7) can be used for GPIO control (bootloader entry, res
 
 ### Project integration
 
-The `open_uart` tool accepts an optional `project_path` parameter. When provided (from project-mcp's `create_project`), engagement data is written to `<project_path>/uart/` instead of creating a standalone folder. Omit it for standalone use.
+The `open_uart` tool accepts an optional `engagement_path` parameter. When provided (from project-mcp's `open_engagement`), engagement data is written to `<engagement_path>/uart/` instead of creating a standalone folder. Omit it for standalone use.
 
 ### Known limitations
 

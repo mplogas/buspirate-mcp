@@ -339,34 +339,34 @@ class TestProtocolSessionCreation:
         assert config["baud"] == 9600
         assert "protocol_config" not in config
 
-    def test_project_path_spi(self, tmp_path):
+    def test_engagement_path_spi(self, tmp_path):
         project = tmp_path / "project-001"
         project.mkdir()
         mgr = SessionManager(engagements_dir=tmp_path)
         session = mgr.create(
             name="dev", hardware=None, protocol="spi",
-            project_path=str(project),
+            engagement_path=str(project),
         )
         assert session.engagement_path == project / "spi"
         assert (project / "spi" / "logs").is_dir()
 
-    def test_project_path_i2c(self, tmp_path):
+    def test_engagement_path_i2c(self, tmp_path):
         project = tmp_path / "project-002"
         project.mkdir()
         mgr = SessionManager(engagements_dir=tmp_path)
         session = mgr.create(
             name="dev", hardware=None, protocol="i2c",
-            project_path=str(project),
+            engagement_path=str(project),
         )
         assert session.engagement_path == project / "i2c"
 
-    def test_project_path_1wire(self, tmp_path):
+    def test_engagement_path_1wire(self, tmp_path):
         project = tmp_path / "project-003"
         project.mkdir()
         mgr = SessionManager(engagements_dir=tmp_path)
         session = mgr.create(
             name="dev", hardware=None, protocol="1wire",
-            project_path=str(project),
+            engagement_path=str(project),
         )
         assert session.engagement_path == project / "onewire"
 

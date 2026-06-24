@@ -116,9 +116,9 @@ TOOL_DEFINITIONS = [
                 "tx_pin": {"type": "integer", "description": "BP IO pin number for TX (e.g., 4)", "default": 4},
                 "rx_pin": {"type": "integer", "description": "BP IO pin number for RX (e.g., 5)", "default": 5},
                 "engagement_name": {"type": "string", "description": "Target device name"},
-                "project_path": {
+                "engagement_path": {
                     "type": "string",
-                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/uart/ instead of creating a standalone engagement.",
+                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/uart/ instead of creating a standalone engagement.",
                 },
             },
             "required": ["baud", "engagement_name"],
@@ -285,9 +285,9 @@ TOOL_DEFINITIONS = [
                 "chip_select_idle": {"type": "boolean", "default": True, "description": "CS idle state (true=high)"},
                 "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
                 "current_ma": {"type": "integer", "description": "Current limit in mA"},
-                "project_path": {
+                "engagement_path": {
                     "type": "string",
-                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/spi/ instead of creating a standalone engagement.",
+                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/spi/ instead of creating a standalone engagement.",
                 },
             },
             "required": ["engagement_name"],
@@ -409,9 +409,9 @@ TOOL_DEFINITIONS = [
                 "clock_stretch": {"type": "boolean", "default": False, "description": "Enable clock stretching"},
                 "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
                 "current_ma": {"type": "integer", "description": "Current limit in mA"},
-                "project_path": {
+                "engagement_path": {
                     "type": "string",
-                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/i2c/ instead of creating a standalone engagement.",
+                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/i2c/ instead of creating a standalone engagement.",
                 },
             },
             "required": ["engagement_name"],
@@ -532,9 +532,9 @@ TOOL_DEFINITIONS = [
                 "engagement_name": {"type": "string", "description": "Target device name"},
                 "voltage_mv": {"type": "integer", "description": "Target voltage in mV (optional, enables PSU)"},
                 "current_ma": {"type": "integer", "description": "Current limit in mA"},
-                "project_path": {
+                "engagement_path": {
                     "type": "string",
-                    "description": "Path to a project folder (from project-mcp). If provided, writes to <project_path>/1wire/ instead of creating a standalone engagement.",
+                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/onewire/ instead of creating a standalone engagement.",
                 },
             },
             "required": ["engagement_name"],
@@ -609,9 +609,9 @@ TOOL_DEFINITIONS = [
                     "type": "object",
                     "description": "Protocol-specific configuration (speed, mode, etc.)",
                 },
-                "project_path": {
+                "engagement_path": {
                     "type": "string",
-                    "description": "Path to a project folder (from project-mcp)",
+                    "description": "Path to an engagement folder (from project-mcp)",
                 },
             },
             "required": ["engagement_name", "protocol"],
@@ -709,6 +709,10 @@ async def list_tools():
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    if name in {"open_uart", "open_spi", "open_i2c", "open_1wire", "la_prepare"} and "project_path" in arguments:
+        return [TextContent(type="text", text=json.dumps(
+            {"error": "project_path was renamed to engagement_path in v0.3; "
+                      "pass engagement_path instead.", "tool": name}, indent=2))]
     tier = classify_tool(name)
     logger.info("tool=%s tier=%s args=%s", name, tier.value, arguments)
 
@@ -762,7 +766,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 },
                 engagement_name=arguments["engagement_name"],
                 device_path=_hardware_port,
-                project_path=arguments.get("project_path"),
+                engagement_path=arguments.get("engagement_path"),
             )
 
         elif name == "read_output":
@@ -839,7 +843,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 chip_select_idle=arguments.get("chip_select_idle", True),
                 voltage_mv=arguments.get("voltage_mv"),
                 current_ma=arguments.get("current_ma"),
-                project_path=arguments.get("project_path"),
+                engagement_path=arguments.get("engagement_path"),
             )
 
         elif name == "spi_probe":
@@ -900,7 +904,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 clock_stretch=arguments.get("clock_stretch", False),
                 voltage_mv=arguments.get("voltage_mv"),
                 current_ma=arguments.get("current_ma"),
-                project_path=arguments.get("project_path"),
+                engagement_path=arguments.get("engagement_path"),
             )
 
         elif name == "i2c_scan":
@@ -952,7 +956,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 engagement_name=arguments["engagement_name"],
                 voltage_mv=arguments.get("voltage_mv"),
                 current_ma=arguments.get("current_ma"),
-                project_path=arguments.get("project_path"),
+                engagement_path=arguments.get("engagement_path"),
             )
 
         elif name == "onewire_search":
@@ -987,7 +991,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 engagement_name=arguments["engagement_name"],
                 protocol=arguments["protocol"],
                 protocol_config=arguments.get("protocol_config"),
-                project_path=arguments.get("project_path"),
+                engagement_path=arguments.get("engagement_path"),
             )
             # Null hardware so next BPIO2 call re-detects after FALA cleanup
             _hardware = None
