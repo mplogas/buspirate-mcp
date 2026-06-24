@@ -534,7 +534,7 @@ TOOL_DEFINITIONS = [
                 "current_ma": {"type": "integer", "description": "Current limit in mA"},
                 "engagement_path": {
                     "type": "string",
-                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/1wire/ instead of creating a standalone engagement.",
+                    "description": "Path to an engagement folder (from project-mcp). If provided, writes to <engagement_path>/onewire/ instead of creating a standalone engagement.",
                 },
             },
             "required": ["engagement_name"],
@@ -709,11 +709,10 @@ async def list_tools():
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    if "project_path" in arguments:
-        return [TextContent(type="text", text=json.dumps({
-            "error": "project_path was renamed to engagement_path in v0.3. "
-                     "Pass engagement_path instead.",
-        }))]
+    if name in {"open_uart", "open_spi", "open_i2c", "open_1wire", "la_prepare"} and "project_path" in arguments:
+        return [TextContent(type="text", text=json.dumps(
+            {"error": "project_path was renamed to engagement_path in v0.3; "
+                      "pass engagement_path instead.", "tool": name}, indent=2))]
     tier = classify_tool(name)
     logger.info("tool=%s tier=%s args=%s", name, tier.value, arguments)
 
